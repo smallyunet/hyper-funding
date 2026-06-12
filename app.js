@@ -1,13 +1,19 @@
 const API_URL = "https://api.hyperliquid.xyz/info";
 const REFRESH_MS = 30_000;
 const HOURS_PER_YEAR = 24 * 365;
-const HISTORY_CACHE_PREFIX = "hyperFunding.history.v2";
+const HISTORY_CACHE_PREFIX = "hyperFunding.history.v3";
 const HISTORY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
-const HISTORY_CONCURRENCY = 3;
+const HISTORY_CONCURRENCY = 1;
 const FUNDING_HISTORY_CHUNK_HOURS = 480;
 const FUNDING_HISTORY_STEP_MS = 60 * 60 * 1000;
-const HISTORY_CHUNK_RETRIES = 3;
-const HISTORY_RETRY_DELAY_MS = 800;
+const HISTORY_CHUNK_RETRIES = 6;
+const HISTORY_REQUEST_INTERVAL_MS = 500;
+const HISTORY_RETRY_DELAY_MS = 1_000;
+const HISTORY_RATE_LIMIT_DELAY_MS = 8_000;
+const HISTORY_MAX_RETRY_DELAY_MS = 60_000;
+
+let historyRequestQueue = Promise.resolve();
+let lastHistoryRequestAt = 0;
 
 const state = {
   rows: [],
@@ -330,6 +336,7 @@ async function loadHistoryData(symbol, days) {
   const chartContainer = document.querySelector(".chart-container");
   chartContainer.style.opacity = "0.6";
   chartContainer.classList.add("is-loading");
+  resetDetailHistorySummary(days, "Loading history...");
   
   try {
     const history = await fetchFundingHistory(symbol, days);
@@ -350,8 +357,9 @@ async function loadHistoryData(symbol, days) {
     
     document.getElementById("detailVolatility").textContent = formatPercent(stats.volatility);
     document.getElementById("detailPosRatio").textContent = `${stats.positiveCount} / ${stats.negativeCount}`;
-    document.getElementById("detailSamplesCount").textContent = `${stats.samples} hourly samples`;
+    document.getElementById("detailSamplesCount").textContent = `${stats.samples} hourly samples (${formatSampleDays(stats.sampleDays)} available)`;
     document.getElementById("detailHitRate").textContent = formatPercent(stats.directionHitRate);
+    updateDetailHistorySubtitle(days, stats.sampleDays);
     
     // Process points for line chart
     const chartPoints = history.map(item => ({
@@ -368,10 +376,35 @@ async function loadHistoryData(symbol, days) {
     updateChart(labels, rates, stats.avgFunding);
   } catch (error) {
     console.error("Failed to load historical data", error);
+    resetDetailHistorySummary(days, "History unavailable");
   } finally {
     chartContainer.style.opacity = "1";
     chartContainer.classList.remove("is-loading");
   }
+}
+
+function resetDetailHistorySummary(days, subtitle = "Hourly rates & cumulative yield indicators") {
+  document.getElementById("detailScore").textContent = "--";
+  document.getElementById("detailAvgFunding").textContent = "--";
+  document.getElementById("detailAvgApr").textContent = "--";
+  document.getElementById("detailVolatility").textContent = "--";
+  document.getElementById("detailPosRatio").textContent = "--";
+  document.getElementById("detailSamplesCount").textContent = `${getWindowLabel(days)} window`;
+  document.getElementById("detailHitRate").textContent = "--";
+  const subtitleEl = document.getElementById("detailHistorySubtitle");
+  if (subtitleEl) subtitleEl.textContent = subtitle;
+}
+
+function updateDetailHistorySubtitle(requestedDays, availableDays) {
+  const subtitleEl = document.getElementById("detailHistorySubtitle");
+  if (!subtitleEl) return;
+
+  const requested = getWindowLabel(requestedDays);
+  const available = formatSampleDays(availableDays);
+  const isLimited = Number.isFinite(availableDays) && availableDays + 0.5 < requestedDays;
+  subtitleEl.textContent = isLimited
+    ? `Requested ${requested}; available history ${available}`
+    : `Requested ${requested}; ${available} sampled`;
 }
 
 // Render line chart with area gradient matching rate tone
@@ -508,6 +541,7 @@ async function analyzeSymbols(symbols) {
 
   const days = Number(elements.historyWindowSelect.value) || 7;
   const results = [];
+  const failedSymbols = [];
   let completed = 0;
 
   try {
@@ -520,6 +554,7 @@ async function analyzeSymbols(symbols) {
             return summarizeFundingHistory(symbol, history);
           } catch (error) {
             console.error(error);
+            failedSymbols.push(symbol.replace("xyz:", ""));
             return null;
           } finally {
             completed += 1;
@@ -536,7 +571,8 @@ async function analyzeSymbols(symbols) {
 
     const validResults = results.filter(Boolean);
     mergeAnalysisRows(validResults);
-    setAnalysisStatus(`Analyzed ${validResults.length} market(s), ${days}d window`);
+    const failedText = failedSymbols.length ? `, failed: ${failedSymbols.join(", ")}` : "";
+    setAnalysisStatus(`Analyzed ${validResults.length} market(s), ${days}d window${failedText}`);
   } catch (error) {
     console.error(error);
     setAnalysisStatus("History analysis failed");
@@ -566,10 +602,15 @@ async function fetchFundingHistory(symbol, days) {
   const startTime = endTime - days * 24 * 60 * 60 * 1000;
   const chunkMs = FUNDING_HISTORY_CHUNK_HOURS * FUNDING_HISTORY_STEP_MS;
   const chunks = [];
+  let hasSeenHistory = false;
 
-  for (let cursor = startTime; cursor < endTime; cursor += chunkMs) {
-    const chunkEnd = Math.min(cursor + chunkMs - 1, endTime);
-    const chunk = await fetchFundingHistoryChunk(symbol, cursor, chunkEnd);
+  for (let cursorEnd = endTime; cursorEnd > startTime; cursorEnd -= chunkMs) {
+    const chunkStart = Math.max(startTime, cursorEnd - chunkMs + 1);
+    const chunk = await fetchFundingHistoryChunk(symbol, chunkStart, cursorEnd);
+    if (!chunk.length && hasSeenHistory) break;
+    if (!chunk.length) continue;
+
+    hasSeenHistory = true;
     chunks.push(...chunk);
   }
 
@@ -583,7 +624,7 @@ async function fetchFundingHistoryChunk(symbol, startTime, endTime) {
 
   for (let attempt = 1; attempt <= HISTORY_CHUNK_RETRIES; attempt += 1) {
     try {
-      const response = await fetch(API_URL, {
+      const response = await scheduleHistoryRequest(() => fetch(API_URL, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -592,10 +633,13 @@ async function fetchFundingHistoryChunk(symbol, startTime, endTime) {
           startTime,
           endTime,
         }),
-      });
+      }));
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        const error = new Error(`HTTP ${response.status}`);
+        error.status = response.status;
+        error.retryAfterMs = getRetryAfterMs(response.headers);
+        throw error;
       }
 
       const data = await response.json();
@@ -607,7 +651,11 @@ async function fetchFundingHistoryChunk(symbol, startTime, endTime) {
     } catch (error) {
       lastError = error;
       if (attempt < HISTORY_CHUNK_RETRIES) {
-        await sleep(HISTORY_RETRY_DELAY_MS * attempt);
+        const delayMs = getHistoryRetryDelayMs(error, attempt);
+        if (error?.status === 429 && state.analyzing) {
+          setAnalysisStatus(`Rate limited; retrying ${symbol.replace("xyz:", "")} in ${formatRetryDelay(delayMs)}`);
+        }
+        await sleep(delayMs);
       }
     }
   }
@@ -615,6 +663,50 @@ async function fetchFundingHistoryChunk(symbol, startTime, endTime) {
   const from = new Date(startTime).toISOString();
   const to = new Date(endTime).toISOString();
   throw new Error(`History ${symbol} failed for ${from} - ${to}: ${lastError?.message ?? "unknown error"}`);
+}
+
+function scheduleHistoryRequest(request) {
+  const run = historyRequestQueue.then(async () => {
+    const elapsed = Date.now() - lastHistoryRequestAt;
+    if (elapsed < HISTORY_REQUEST_INTERVAL_MS) {
+      await sleep(HISTORY_REQUEST_INTERVAL_MS - elapsed);
+    }
+
+    lastHistoryRequestAt = Date.now();
+    return request();
+  });
+
+  historyRequestQueue = run.catch(() => {});
+  return run;
+}
+
+function getRetryAfterMs(headers) {
+  const retryAfter = headers.get("retry-after");
+  if (!retryAfter) return 0;
+
+  const seconds = Number(retryAfter);
+  if (Number.isFinite(seconds)) {
+    return Math.max(0, seconds * 1000);
+  }
+
+  const retryDate = Date.parse(retryAfter);
+  if (Number.isFinite(retryDate)) {
+    return Math.max(0, retryDate - Date.now());
+  }
+
+  return 0;
+}
+
+function getHistoryRetryDelayMs(error, attempt) {
+  const baseDelay = error?.status === 429 ? HISTORY_RATE_LIMIT_DELAY_MS : HISTORY_RETRY_DELAY_MS;
+  const retryAfterMs = error?.status === 429 ? error.retryAfterMs || 0 : 0;
+  const backoffMs = baseDelay * attempt;
+  return Math.min(HISTORY_MAX_RETRY_DELAY_MS, Math.max(retryAfterMs, backoffMs));
+}
+
+function formatRetryDelay(ms) {
+  if (!Number.isFinite(ms)) return "soon";
+  return `${Math.ceil(ms / 1000)}s`;
 }
 
 function dedupeAndSortHistory(history) {
@@ -665,6 +757,14 @@ function formatSampleDays(days) {
   if (!Number.isFinite(days)) return "--";
   if (days < 1) return `${(days * 24).toFixed(0)}h`;
   return `${days.toFixed(1)}d`;
+}
+
+function getWindowLabel(days) {
+  const number = Number(days);
+  if (!Number.isFinite(number)) return "selected";
+  if (number === 365) return "1 Year";
+  if (number === 1) return "1 Day";
+  return `${number} Days`;
 }
 
 function mergeAnalysisRows(rows) {
