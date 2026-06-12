@@ -19,6 +19,14 @@ const state = {
   rows: [],
   filteredRows: [],
   analysisRows: [],
+  marketMetadata: {
+    conciseAnnotations: new Map(),
+    categories: new Map(),
+    oiCaps: new Map(),
+    fullAnnotations: new Map(),
+    loaded: false,
+    loading: null,
+  },
   direction: "all",
   sort: "funding-desc",
   search: "",
@@ -95,6 +103,11 @@ async function fetchMarkets() {
 
     const [meta, contexts] = await response.json();
     state.rows = normalizeRows(meta?.universe ?? [], contexts ?? []);
+    loadSupplementalMetadata().then(() => {
+      if (state.selectedSymbol) {
+        updateDetailMetadata(state.selectedSymbol);
+      }
+    });
     setStatus("ready", "Live");
     render();
   } catch (error) {
@@ -130,6 +143,9 @@ function normalizeRows(universe, contexts) {
         openInterest,
         volume,
         maxLeverage: asset.maxLeverage,
+        marginMode: asset.marginMode,
+        growthMode: asset.growthMode,
+        lastGrowthModeChangeTime: asset.lastGrowthModeChangeTime,
       };
     })
     .filter((row) => Number.isFinite(row.funding));
@@ -298,6 +314,12 @@ async function selectSymbol(symbol, isManual = false) {
   
   // Live Metrics updates
   updateDetailPanelLiveMetrics(symbol);
+  updateDetailMetadata(symbol);
+  loadFullAnnotation(symbol).then(() => {
+    if (state.selectedSymbol === symbol) {
+      updateDetailMetadata(symbol);
+    }
+  });
   
   // Show detail content & hide empty state
   elements.detailPanelContent.classList.remove("hidden");
@@ -331,6 +353,117 @@ function updateDetailPanelLiveMetrics(symbol) {
   document.getElementById("detailBasis").textContent = `${row.basis >= 0 ? '+' : ''}${formatPercent(row.basis)}`;
 }
 
+async function loadSupplementalMetadata() {
+  if (state.marketMetadata.loaded) return;
+  if (state.marketMetadata.loading) return state.marketMetadata.loading;
+
+  state.marketMetadata.loading = (async () => {
+    const [conciseResult, categoriesResult, dexsResult] = await Promise.allSettled([
+      fetchInfo({ type: "perpConciseAnnotations" }),
+      fetchInfo({ type: "perpCategories" }),
+      fetchInfo({ type: "perpDexs" }),
+    ]);
+
+    if (conciseResult.status === "fulfilled" && Array.isArray(conciseResult.value)) {
+      state.marketMetadata.conciseAnnotations = new Map(conciseResult.value);
+    }
+
+    if (categoriesResult.status === "fulfilled" && Array.isArray(categoriesResult.value)) {
+      state.marketMetadata.categories = new Map(categoriesResult.value);
+    }
+
+    if (dexsResult.status === "fulfilled" && Array.isArray(dexsResult.value)) {
+      const xyzDex = dexsResult.value.find((dex) => dex?.name === "xyz");
+      state.marketMetadata.oiCaps = new Map(xyzDex?.assetToStreamingOiCap ?? []);
+    }
+
+    state.marketMetadata.loaded = true;
+  })().catch((error) => {
+    console.error("Failed to load supplemental metadata", error);
+  }).finally(() => {
+    state.marketMetadata.loading = null;
+  });
+
+  return state.marketMetadata.loading;
+}
+
+async function loadFullAnnotation(symbol) {
+  if (state.marketMetadata.fullAnnotations.has(symbol)) return;
+
+  try {
+    const annotation = await fetchInfo({ type: "perpAnnotation", coin: symbol });
+    state.marketMetadata.fullAnnotations.set(symbol, annotation ?? null);
+  } catch (error) {
+    console.error(`Failed to load annotation for ${symbol}`, error);
+    state.marketMetadata.fullAnnotations.set(symbol, null);
+  }
+}
+
+async function fetchInfo(body) {
+  const response = await fetch(API_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+
+function updateDetailMetadata(symbol) {
+  const row = state.rows.find((item) => item.symbol === symbol);
+  if (!row) return;
+
+  const fullAnnotation = state.marketMetadata.fullAnnotations.get(symbol);
+  const conciseAnnotation = state.marketMetadata.conciseAnnotations.get(symbol);
+  const annotation = fullAnnotation || conciseAnnotation || {};
+  const category = annotation.category || state.marketMetadata.categories.get(symbol);
+  const keywords = Array.isArray(annotation.keywords) ? annotation.keywords : [];
+  const oiCap = Number(state.marketMetadata.oiCaps.get(symbol));
+
+  document.getElementById("detailMetadataSource").textContent = state.marketMetadata.loaded
+    ? "Hyperliquid metadata"
+    : "Loading optional sources";
+  document.getElementById("detailCategory").textContent = formatOptional(category);
+  document.getElementById("detailOiCap").textContent = Number.isFinite(oiCap) ? formatUsd(oiCap) : "Not available";
+  document.getElementById("detailMarginMode").textContent = formatOptional(formatMode(row.marginMode));
+  document.getElementById("detailGrowthMode").textContent = formatOptional(formatMode(row.growthMode));
+  document.getElementById("detailDescription").textContent = annotation.description || "No annotation available.";
+  document.getElementById("detailKeywords").innerHTML = keywords.length
+    ? keywords.map((keyword) => `<span class="metadata-chip">${escapeHtml(keyword)}</span>`).join("")
+    : "";
+  document.getElementById("detailLinks").innerHTML = getMetadataLinks(row, category)
+    .map((link) => `<a class="metadata-link" href="${escapeHtml(link.href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(link.label)}</a>`)
+    .join("");
+}
+
+function getMetadataLinks(row, category) {
+  const links = [
+    {
+      label: "Hyperliquid",
+      href: `https://app.hyperliquid.xyz/trade/${encodeURIComponent(row.symbol)}`,
+    },
+  ];
+
+  if (category === "stocks" && /^[A-Z.]+$/.test(row.displaySymbol)) {
+    links.push(
+      {
+        label: "Yahoo Finance",
+        href: `https://finance.yahoo.com/quote/${encodeURIComponent(row.displaySymbol)}`,
+      },
+      {
+        label: "Nasdaq",
+        href: `https://www.nasdaq.com/market-activity/stocks/${encodeURIComponent(row.displaySymbol.toLowerCase())}`,
+      },
+    );
+  }
+
+  return links;
+}
+
 // Fetch historical rates, calculate analytics summary, and render line graph
 async function loadHistoryData(symbol, days) {
   const chartContainer = document.querySelector(".chart-container");
@@ -359,6 +492,8 @@ async function loadHistoryData(symbol, days) {
     document.getElementById("detailPosRatio").textContent = `${stats.positiveCount} / ${stats.negativeCount}`;
     document.getElementById("detailSamplesCount").textContent = `${stats.samples} hourly samples (${formatSampleDays(stats.sampleDays)} available)`;
     document.getElementById("detailHitRate").textContent = formatPercent(stats.directionHitRate);
+    document.getElementById("detailFirstFunding").textContent = formatDateOnly(stats.firstSampleTime);
+    document.getElementById("detailFirstFundingDesc").textContent = `${formatTimeOnly(stats.firstSampleTime)} UTC`;
     updateDetailHistorySubtitle(days, stats.sampleDays);
     
     // Process points for line chart
@@ -391,6 +526,8 @@ function resetDetailHistorySummary(days, subtitle = "Hourly rates & cumulative y
   document.getElementById("detailPosRatio").textContent = "--";
   document.getElementById("detailSamplesCount").textContent = `${getWindowLabel(days)} window`;
   document.getElementById("detailHitRate").textContent = "--";
+  document.getElementById("detailFirstFunding").textContent = "--";
+  document.getElementById("detailFirstFundingDesc").textContent = "Earliest available history";
   const subtitleEl = document.getElementById("detailHistorySubtitle");
   if (subtitleEl) subtitleEl.textContent = subtitle;
 }
@@ -720,7 +857,14 @@ function dedupeAndSortHistory(history) {
 }
 
 function summarizeFundingHistory(symbol, history) {
-  const values = history.map((item) => Number(item.fundingRate)).filter(Number.isFinite);
+  const validHistory = history
+    .map((item) => ({
+      time: Number(item.time),
+      fundingRate: Number(item.fundingRate),
+    }))
+    .filter((item) => Number.isFinite(item.time) && Number.isFinite(item.fundingRate))
+    .sort((a, b) => a.time - b.time);
+  const values = validHistory.map((item) => item.fundingRate);
   if (!values.length) return null;
 
   const avgFunding = mean(values);
@@ -745,6 +889,8 @@ function summarizeFundingHistory(symbol, history) {
     negativeCount,
     samples: values.length,
     sampleDays: values.length / 24,
+    firstSampleTime: validHistory[0].time,
+    lastSampleTime: validHistory.at(-1).time,
     score,
   };
 }
@@ -765,6 +911,28 @@ function getWindowLabel(days) {
   if (number === 365) return "1 Year";
   if (number === 1) return "1 Day";
   return `${number} Days`;
+}
+
+function formatDateOnly(time) {
+  if (!Number.isFinite(time)) return "--";
+  return new Date(time).toISOString().slice(0, 10);
+}
+
+function formatTimeOnly(time) {
+  if (!Number.isFinite(time)) return "--";
+  return new Date(time).toISOString().slice(11, 16);
+}
+
+function formatOptional(value) {
+  return value ? value : "Not available";
+}
+
+function formatMode(value) {
+  if (!value) return "";
+  return String(value)
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[-_]/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function mergeAnalysisRows(rows) {
