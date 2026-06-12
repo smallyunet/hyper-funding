@@ -309,7 +309,7 @@
                 </select>
               </label>
               <label class="select-field compact-field">
-                <span>Rows from Current Sort</span>
+                <span id="analysisLimitLabel">Rows from Current Sort</span>
                 <select id="analysisLimitSelect">
                   <option value="5">First 5 rows</option>
                   <option value="10" selected>First 10 rows</option>
@@ -325,6 +325,11 @@
               </button>
               <button class="text-button secondary" id="clearHistoryCacheButton" type="button">Clear Cache</button>
             </div>
+          </div>
+
+          <!-- Progress Bar -->
+          <div class="analysis-progress-wrapper" id="analysisProgressWrapper">
+            <div class="analysis-progress-bar" id="analysisProgressBar"></div>
           </div>
 
           <div class="score-grid">

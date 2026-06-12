@@ -47,6 +47,8 @@ const elements = {
   analyzeTopButton: document.getElementById("analyzeTopButton"),
   clearHistoryCacheButton: document.getElementById("clearHistoryCacheButton"),
   analysisStatus: document.getElementById("analysisStatus"),
+  analysisProgressWrapper: document.getElementById("analysisProgressWrapper"),
+  analysisProgressBar: document.getElementById("analysisProgressBar"),
   analysisRows: document.getElementById("analysisRows"),
   analyzedCount: document.getElementById("analyzedCount"),
   bestScore: document.getElementById("bestScore"),
@@ -140,6 +142,8 @@ function render() {
     // Keep live metrics fresh on auto-refresh
     updateDetailPanelLiveMetrics(state.selectedSymbol);
   }
+
+  updateAnalysisStatusDescription();
 }
 
 function applyFiltersAndSort() {
@@ -488,6 +492,11 @@ async function analyzeSymbols(symbols) {
   elements.analyzeTopButton.disabled = true;
   setAnalysisStatus(`Analyzing 0 / ${uniqueSymbols.length}`);
 
+  if (elements.analysisProgressWrapper && elements.analysisProgressBar) {
+    elements.analysisProgressBar.style.width = "0%";
+    elements.analysisProgressWrapper.classList.add("active");
+  }
+
   const days = Number(elements.historyWindowSelect.value) || 7;
   const results = [];
   let completed = 0;
@@ -506,6 +515,10 @@ async function analyzeSymbols(symbols) {
           } finally {
             completed += 1;
             setAnalysisStatus(`Analyzing ${completed} / ${uniqueSymbols.length}`);
+            if (elements.analysisProgressBar) {
+              const percent = Math.min(100, Math.round((completed / uniqueSymbols.length) * 100));
+              elements.analysisProgressBar.style.width = `${percent}%`;
+            }
           }
         }),
       );
@@ -522,6 +535,16 @@ async function analyzeSymbols(symbols) {
     state.analyzing = false;
     elements.analyzeTopButton.disabled = false;
     renderAnalysis();
+
+    if (elements.analysisProgressBar && elements.analysisProgressWrapper) {
+      elements.analysisProgressBar.style.width = "100%";
+      setTimeout(() => {
+        elements.analysisProgressWrapper.classList.remove("active");
+        setTimeout(() => {
+          elements.analysisProgressBar.style.width = "0%";
+        }, 300);
+      }, 600);
+    }
   }
 }
 
@@ -608,6 +631,49 @@ function mergeAnalysisRows(rows) {
   const existing = new Map(state.analysisRows.map((row) => [row.symbol, row]));
   rows.forEach((row) => existing.set(row.symbol, row));
   state.analysisRows = [...existing.values()];
+}
+
+function getSortLabel(sortValue) {
+  const sortMap = {
+    "funding-desc": "Funding (H → L)",
+    "funding-asc": "Funding (L → H)",
+    "apr-desc": "Est. APR (H → L)",
+    "volume-desc": "24h Vol (H → L)",
+    "oi-desc": "Open Interest (H → L)",
+    "basis-desc": "Basis (H → L)",
+  };
+  return sortMap[sortValue] ?? "Current Sort";
+}
+
+function getActiveFiltersDescription() {
+  const parts = [];
+  if (state.search.trim()) {
+    parts.push(`Search: "${state.search.trim()}"`);
+  }
+  if (state.direction !== "all") {
+    parts.push(`Dir: ${state.direction === "positive" ? "Pos" : "Neg"}`);
+  }
+  if (state.minVolume > 0) {
+    parts.push(`Vol ≥ ${formatUsd(state.minVolume)}`);
+  }
+  if (state.minOi > 0) {
+    parts.push(`OI ≥ ${formatCompact(state.minOi)}`);
+  }
+  return parts.length ? parts.join(", ") : "None";
+}
+
+function updateAnalysisStatusDescription() {
+  const sortLabel = getSortLabel(state.sort);
+  const limitLabelEl = document.getElementById("analysisLimitLabel");
+  if (limitLabelEl) {
+    limitLabelEl.textContent = `Rows from ${sortLabel}`;
+  }
+
+  if (!state.analyzing) {
+    const filtersDesc = getActiveFiltersDescription();
+    const filterText = filtersDesc !== "None" ? ` (Filters: ${filtersDesc})` : "";
+    setAnalysisStatus(`Uses current Market Board sort (${sortLabel})${filterText}`);
+  }
 }
 
 function setAnalysisStatus(text) {
