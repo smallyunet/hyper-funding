@@ -3,15 +3,29 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Hyper Funding Panel</title>
+    <title>Hyper Funding Monitor</title>
+    <!-- Modern Tech Google Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- ChartJS for Funding History Graphs -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
+    <!-- Background grid decoration -->
+    <div class="bg-grid-dec"></div>
+    <div class="bg-glow-dec"></div>
+
     <main class="app-shell">
+      <!-- Top Header Bar -->
       <header class="topbar">
-        <div>
-          <p class="eyebrow">Hyperliquid XYZ</p>
-          <h1>Funding Monitor</h1>
+        <div class="brand-group">
+          <span class="logo-badge">HL</span>
+          <div>
+            <p class="eyebrow">Hyperliquid XYZ</p>
+            <h1>Funding Monitor</h1>
+          </div>
         </div>
         <div class="topbar-actions">
           <div class="status-pill" id="connectionStatus">
@@ -24,172 +38,331 @@
         </div>
       </header>
 
+      <!-- Global Market Overview Metrics -->
       <section class="metrics-grid" aria-label="Market overview">
         <article class="metric-panel">
-          <span class="metric-label">Markets</span>
-          <strong id="marketCount">--</strong>
-          <span id="updatedAt">--</span>
+          <div class="metric-info">
+            <span class="metric-label">Total Markets</span>
+            <strong id="marketCount">--</strong>
+          </div>
+          <span class="metric-sub" id="updatedAt">--</span>
+        </article>
+        <article class="metric-panel text-pos">
+          <div class="metric-info">
+            <span class="metric-label">Highest Funding (1h)</span>
+            <strong id="highestFunding">--</strong>
+          </div>
+          <span class="metric-sub symbol-badge" id="highestSymbol">--</span>
+        </article>
+        <article class="metric-panel text-neg">
+          <div class="metric-info">
+            <span class="metric-label">Lowest Funding (1h)</span>
+            <strong id="lowestFunding">--</strong>
+          </div>
+          <span class="metric-sub symbol-badge" id="lowestSymbol">--</span>
         </article>
         <article class="metric-panel">
-          <span class="metric-label">Highest Funding</span>
-          <strong id="highestFunding">--</strong>
-          <span id="highestSymbol">--</span>
-        </article>
-        <article class="metric-panel">
-          <span class="metric-label">Lowest Funding</span>
-          <strong id="lowestFunding">--</strong>
-          <span id="lowestSymbol">--</span>
-        </article>
-        <article class="metric-panel">
-          <span class="metric-label">Positive / Negative</span>
-          <strong id="directionSplit">--</strong>
-          <span>funding direction</span>
+          <div class="metric-info">
+            <span class="metric-label">Positive / Negative</span>
+            <strong id="directionSplit">--</strong>
+          </div>
+          <span class="metric-sub">funding distribution</span>
         </article>
       </section>
 
-      <section class="control-strip" aria-label="Controls">
-        <label class="search-box">
-          <span>Symbol</span>
-          <input id="searchInput" type="search" placeholder="NVDA, TSLA, SP500" autocomplete="off" />
-        </label>
+      <!-- Tab Navigation -->
+      <nav class="tab-navigation" role="tablist">
+        <button class="tab-btn active" id="tabMarkets" type="button" role="tab" aria-selected="true" data-target="viewMarketBoard">
+          <svg class="tab-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 3v18h18M18.7 8l-5.1 5.2-2.8-2.7L7 14.3"/></svg>
+          Market Board
+        </button>
+        <button class="tab-btn" id="tabAnalytics" type="button" role="tab" aria-selected="false" data-target="viewBatchAnalytics">
+          <svg class="tab-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M12 20V10M18 20V4M6 20v-4"/></svg>
+          Batch Analytics
+        </button>
+      </nav>
 
-        <div class="segmented" role="group" aria-label="Funding direction">
-          <button class="segment active" type="button" data-direction="all">All</button>
-          <button class="segment" type="button" data-direction="positive">Positive</button>
-          <button class="segment" type="button" data-direction="negative">Negative</button>
-        </div>
+      <!-- VIEW 1: Market Board (Split Layout) -->
+      <div class="view-content active" id="viewMarketBoard">
+        <div class="split-layout">
+          <!-- Left Column: Markets List & Filters -->
+          <div class="split-left">
+            <div class="panel-card filter-card">
+              <div class="control-strip" aria-label="Controls">
+                <label class="search-box">
+                  <span>Search Symbol</span>
+                  <div class="search-input-wrapper">
+                    <input id="searchInput" type="search" placeholder="BTC, ETH, SOL..." autocomplete="off" />
+                  </div>
+                </label>
 
-        <label class="select-field">
-          <span>Sort</span>
-          <select id="sortSelect">
-            <option value="funding-desc">Funding high to low</option>
-            <option value="funding-asc">Funding low to high</option>
-            <option value="apr-desc">APR high to low</option>
-            <option value="volume-desc">Volume high to low</option>
-            <option value="oi-desc">Open interest high to low</option>
-            <option value="basis-desc">Basis high to low</option>
-          </select>
-        </label>
+                <div class="control-group">
+                  <span>Funding Dir</span>
+                  <div class="segmented" role="group" aria-label="Funding direction">
+                    <button class="segment active" type="button" data-direction="all">All</button>
+                    <button class="segment" type="button" data-direction="positive">Pos</button>
+                    <button class="segment" type="button" data-direction="negative">Neg</button>
+                  </div>
+                </div>
 
-        <label class="number-field">
-          <span>Min 24h Volume</span>
-          <input id="minVolumeInput" type="number" min="0" step="10000" placeholder="0" />
-        </label>
+                <label class="select-field">
+                  <span>Sort By</span>
+                  <select id="sortSelect">
+                    <option value="funding-desc">Funding (H → L)</option>
+                    <option value="funding-asc">Funding (L → H)</option>
+                    <option value="apr-desc">Est. APR (H → L)</option>
+                    <option value="volume-desc">24h Vol (H → L)</option>
+                    <option value="oi-desc">Open Interest (H → L)</option>
+                    <option value="basis-desc">Basis (H → L)</option>
+                  </select>
+                </label>
 
-        <label class="number-field">
-          <span>Min OI</span>
-          <input id="minOiInput" type="number" min="0" step="100" placeholder="0" />
-        </label>
-      </section>
+                <label class="number-field">
+                  <span>Min 24h Vol</span>
+                  <input id="minVolumeInput" type="number" min="0" step="50000" placeholder="$0" />
+                </label>
 
-      <section class="analysis-shell" aria-label="History analysis">
-        <div class="analysis-header">
-          <div>
-            <h2>History Analysis</h2>
-            <p id="analysisStatus">Analyze selected markets with browser-side fundingHistory requests</p>
+                <label class="number-field">
+                  <span>Min OI</span>
+                  <input id="minOiInput" type="number" min="0" step="1000" placeholder="0" />
+                </label>
+              </div>
+            </div>
+
+            <section class="panel-card table-shell" aria-label="Funding table">
+              <div class="table-header">
+                <div>
+                  <h2>Perpetual Markets</h2>
+                  <p id="resultCount">-- rows</p>
+                </div>
+                <div class="table-tools">
+                  <button class="text-button" id="exportButton" type="button">
+                    <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" class="btn-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                    Export CSV
+                  </button>
+                  <label class="toggle-field">
+                    <input id="autoRefreshToggle" type="checkbox" checked />
+                    <span class="toggle-switch"></span>
+                    <span>Auto Refresh</span>
+                  </label>
+                </div>
+              </div>
+
+              <div class="table-scroll">
+                <table class="market-table">
+                  <thead>
+                    <tr>
+                      <th>Symbol</th>
+                      <th class="num">Funding / Hr</th>
+                      <th class="num">Est. APR</th>
+                      <th class="num">Price</th>
+                      <th class="num">Basis</th>
+                      <th class="num">Open Interest</th>
+                      <th class="num">24h Volume</th>
+                      <th class="num">Max Lev</th>
+                    </tr>
+                  </thead>
+                  <tbody id="fundingRows">
+                    <tr>
+                      <td colspan="9" class="empty-cell">
+                        <div class="loading-spinner-wrapper">
+                          <span class="spinner"></span>
+                          <span>Loading market data...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
           </div>
-          <div class="analysis-actions">
-            <label class="select-field compact-field">
-              <span>Window</span>
-              <select id="historyWindowSelect">
-                <option value="7">7d</option>
-                <option value="14">14d</option>
-                <option value="30">30d</option>
-              </select>
-            </label>
-            <label class="select-field compact-field">
-              <span>Batch</span>
-              <select id="analysisLimitSelect">
-                <option value="5">Top 5</option>
-                <option value="10" selected>Top 10</option>
-                <option value="20">Top 20</option>
-              </select>
-            </label>
-            <button class="text-button" id="analyzeTopButton" type="button">Analyze top</button>
-            <button class="text-button secondary" id="clearHistoryCacheButton" type="button">Clear cache</button>
+
+          <!-- Right Column: Selected Market Detail & Historical Chart -->
+          <div class="split-right">
+            <section class="panel-card detail-panel" id="detailPanel">
+              <!-- Empty State (Shown when no symbol selected) -->
+              <div class="detail-empty" id="detailEmptyState">
+                <div class="empty-icon-wrapper">
+                  <svg viewBox="0 0 24 24" width="48" height="48" stroke="currentColor" stroke-width="1.5" fill="none"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
+                </div>
+                <h3>No Asset Selected</h3>
+                <p>Click any market row to view historical funding rate graphs, volatility scores, and deep analytics.</p>
+              </div>
+
+              <!-- Main Detail Content (Hidden by default) -->
+              <div class="detail-content hidden" id="detailPanelContent">
+                <div class="detail-header">
+                  <div class="detail-symbol-area">
+                    <div class="detail-title-group">
+                      <span class="symbol-badge-lg">XYZ</span>
+                      <h2 id="detailSymbolName">--</h2>
+                    </div>
+                    <p class="detail-subtitle" id="detailLeverageText">Max leverage: --</p>
+                  </div>
+                  <div class="detail-price-area">
+                    <div class="detail-price" id="detailCurrentPrice">--</div>
+                    <div class="detail-funding-pill positive" id="detailCurrentFunding">--</div>
+                  </div>
+                </div>
+
+                <!-- Live Metrics Row -->
+                <div class="detail-metrics-row">
+                  <div class="sub-metric-card">
+                    <span class="sm-label">24h Volume</span>
+                    <strong id="detailVolume">--</strong>
+                  </div>
+                  <div class="sub-metric-card">
+                    <span class="sm-label">Open Interest</span>
+                    <strong id="detailOi">--</strong>
+                  </div>
+                  <div class="sub-metric-card">
+                    <span class="sm-label">Basis Spread</span>
+                    <strong id="detailBasis">--</strong>
+                  </div>
+                </div>
+
+                <!-- History Analysis & Chart Card -->
+                <div class="chart-section-header">
+                  <div>
+                    <h3>Historical Trend</h3>
+                    <p class="chart-subtitle">Hourly rates & cumulative yield indicators</p>
+                  </div>
+                  <div class="chart-controls">
+                    <select id="detailHistoryWindowSelect">
+                      <option value="7">7 Days</option>
+                      <option value="14">14 Days</option>
+                      <option value="30">30 Days</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- Chart Canvas Container -->
+                <div class="chart-container">
+                  <canvas id="fundingChart"></canvas>
+                </div>
+
+                <!-- Analysis Summary Stats Grid -->
+                <div class="detail-stats-section">
+                  <h3>History Analytics Summary</h3>
+                  <div class="detail-stats-grid">
+                    <div class="stat-box">
+                      <span class="stat-label">Stability Score</span>
+                      <strong id="detailScore">--</strong>
+                      <span class="stat-desc">Stability index (0-100)</span>
+                    </div>
+                    <div class="stat-box">
+                      <span class="stat-label">Avg. Funding Rate</span>
+                      <strong id="detailAvgFunding">--</strong>
+                      <span class="stat-desc">Arithmetic mean per hour</span>
+                    </div>
+                    <div class="stat-box">
+                      <span class="stat-label">Avg. APR Est.</span>
+                      <strong id="detailAvgApr">--</strong>
+                      <span class="stat-desc">Extrapolated annual rate</span>
+                    </div>
+                    <div class="stat-box">
+                      <span class="stat-label">Volatility (SD)</span>
+                      <strong id="detailVolatility">--</strong>
+                      <span class="stat-desc">Standard deviation of rates</span>
+                    </div>
+                    <div class="stat-box">
+                      <span class="stat-label">Positive Samples</span>
+                      <strong id="detailPosRatio">--</strong>
+                      <span class="stat-desc" id="detailSamplesCount">-- samples</span>
+                    </div>
+                    <div class="stat-box">
+                      <span class="stat-label">Direction Hit Rate</span>
+                      <strong id="detailHitRate">--</strong>
+                      <span class="stat-desc">Consitency with average</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
           </div>
         </div>
+      </div>
 
-        <div class="score-grid">
-          <article class="score-panel">
-            <span class="metric-label">Analyzed</span>
-            <strong id="analyzedCount">--</strong>
-            <span>markets in current result</span>
-          </article>
-          <article class="score-panel">
-            <span class="metric-label">Best Score</span>
-            <strong id="bestScore">--</strong>
-            <span id="bestScoreSymbol">--</span>
-          </article>
-          <article class="score-panel">
-            <span class="metric-label">Best Avg APR</span>
-            <strong id="bestAvgApr">--</strong>
-            <span id="bestAvgAprSymbol">--</span>
-          </article>
-        </div>
-
-        <div class="table-scroll analysis-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th class="num">Score</th>
-                <th class="num">Avg / hour</th>
-                <th class="num">Avg APR</th>
-                <th class="num">Volatility</th>
-                <th class="num">Direction hit</th>
-                <th class="num">Positive / Negative</th>
-                <th class="num">Samples</th>
-              </tr>
-            </thead>
-            <tbody id="analysisRows">
-              <tr>
-                <td colspan="8" class="empty-cell">Run history analysis from the controls above or a table row</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="table-shell" aria-label="Funding table">
-        <div class="table-header">
-          <div>
-            <h2>Current Funding</h2>
-            <p id="resultCount">-- rows</p>
+      <!-- VIEW 2: Batch Analytics -->
+      <div class="view-content" id="viewBatchAnalytics">
+        <section class="panel-card analysis-shell" aria-label="History analysis">
+          <div class="analysis-header">
+            <div>
+              <h2>Batch History Comparison</h2>
+              <p id="analysisStatus">Analyze selected markets with browser-side fundingHistory requests</p>
+            </div>
+            <div class="analysis-actions">
+              <label class="select-field compact-field">
+                <span>Analysis Window</span>
+                <select id="historyWindowSelect">
+                  <option value="7">7d</option>
+                  <option value="14">14d</option>
+                  <option value="30">30d</option>
+                </select>
+              </label>
+              <label class="select-field compact-field">
+                <span>Batch Limit</span>
+                <select id="analysisLimitSelect">
+                  <option value="5">Top 5</option>
+                  <option value="10" selected>Top 10</option>
+                  <option value="20">Top 20</option>
+                </select>
+              </label>
+              <button class="text-button primary-btn" id="analyzeTopButton" type="button">
+                <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" class="btn-icon"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+                Analyze Top
+              </button>
+              <button class="text-button secondary" id="clearHistoryCacheButton" type="button">Clear Cache</button>
+            </div>
           </div>
-          <div class="table-tools">
-            <button class="text-button" id="exportButton" type="button">Export CSV</button>
-            <label class="toggle-field">
-              <input id="autoRefreshToggle" type="checkbox" checked />
-              <span>Auto refresh</span>
-            </label>
-          </div>
-        </div>
 
-        <div class="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Symbol</th>
-                <th class="num">Funding / hour</th>
-                <th class="num">APR est.</th>
-                <th class="num">Mark</th>
-                <th class="num">Oracle</th>
-                <th class="num">Basis</th>
-                <th class="num">Open Interest</th>
-                <th class="num">24h Volume</th>
-                <th class="num">Max Lev</th>
-                <th class="num">History</th>
-              </tr>
-            </thead>
-            <tbody id="fundingRows">
-              <tr>
-                <td colspan="10" class="empty-cell">Loading market data</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
+          <div class="score-grid">
+            <article class="score-panel">
+              <span class="metric-label">Analyzed Markets</span>
+              <strong id="analyzedCount">--</strong>
+              <span class="score-sub">markets in current result</span>
+            </article>
+            <article class="score-panel">
+              <span class="metric-label">Highest Score</span>
+              <div class="score-value-group">
+                <strong id="bestScore">--</strong>
+                <span class="score-symbol" id="bestScoreSymbol">--</span>
+              </div>
+              <span class="score-sub">highest stability rating</span>
+            </article>
+            <article class="score-panel">
+              <span class="metric-label">Highest Avg APR</span>
+              <div class="score-value-group">
+                <strong id="bestAvgApr">--</strong>
+                <span class="score-symbol" id="bestAvgAprSymbol">--</span>
+              </div>
+              <span class="score-sub">highest absolute historical yield</span>
+            </article>
+          </div>
+
+          <div class="table-scroll analysis-scroll">
+            <table class="analysis-table">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th class="num">Stability Score</th>
+                  <th class="num">Avg / Hour</th>
+                  <th class="num">Avg APR</th>
+                  <th class="num">Volatility (SD)</th>
+                  <th class="num">Direction Hit Rate</th>
+                  <th class="num">Pos / Neg</th>
+                  <th class="num">Samples</th>
+                </tr>
+              </thead>
+              <tbody id="analysisRows">
+                <tr>
+                  <td colspan="8" class="empty-cell">Run history analysis from the controls above or a table row</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
     </main>
 
     <script src="./app.js"></script>
