@@ -37,6 +37,8 @@ const state = {
   refreshTimer: null,
   selectedSymbol: null,
   chartInstance: null,
+  activeView: "viewMarketBoard",
+  autoBatchAnalysisStarted: false,
 };
 
 const elements = {
@@ -168,6 +170,7 @@ function render() {
   }
 
   updateAnalysisStatusDescription();
+  maybeAutoAnalyzeBatch();
 }
 
 function applyFiltersAndSort() {
@@ -637,6 +640,7 @@ function updateChart(labels, data, avgFundingRate) {
 // Swaps the tab view
 function switchTab(viewId) {
   const isMarkets = viewId === "viewMarketBoard";
+  state.activeView = viewId;
   elements.tabMarkets.classList.toggle("active", isMarkets);
   elements.tabMarkets.setAttribute("aria-selected", isMarkets ? "true" : "false");
   elements.tabAnalytics.classList.toggle("active", !isMarkets);
@@ -644,6 +648,16 @@ function switchTab(viewId) {
   
   elements.viewMarketBoard.classList.toggle("active", isMarkets);
   elements.viewBatchAnalytics.classList.toggle("active", !isMarkets);
+  maybeAutoAnalyzeBatch();
+}
+
+function maybeAutoAnalyzeBatch() {
+  if (state.activeView !== "viewBatchAnalytics") return;
+  if (state.autoBatchAnalysisStarted || state.analyzing || state.analysisRows.length) return;
+  if (!state.filteredRows.length) return;
+
+  state.autoBatchAnalysisStarted = true;
+  analyzeTopMarkets();
 }
 
 async function analyzeTopMarkets() {

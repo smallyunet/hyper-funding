@@ -296,7 +296,7 @@ h1 {
 
 .metric-sub {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: #94a3b8;
   margin-top: 8px;
 }
 
@@ -319,6 +319,7 @@ h1 {
   font-size: 11px;
   font-weight: 700;
   border: 1px solid var(--line);
+  color: #94a3b8;
 }
 
 /* Tab Navigation buttons */
@@ -618,8 +619,8 @@ select:focus {
 /* Market Scroll Table */
 .table-scroll {
   overflow: auto;
-  max-height: calc(100vh - 250px);
-  min-height: 700px;
+  max-height: calc(100vh - 120px);
+  min-height: 820px;
   width: 100%;
   -webkit-overflow-scrolling: touch;
 }
@@ -647,11 +648,11 @@ select:focus {
 }
 
 .market-table th {
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 1.2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: #94a3b8;
 }
 
 .market-table td {
@@ -975,9 +976,10 @@ select:focus {
 }
 
 .metadata-description {
-  color: var(--text-secondary);
+  color: #94a3b8;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.6;
+  font-weight: 400;
   margin-bottom: 10px;
 }
 
@@ -1090,7 +1092,7 @@ select:focus {
   font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: #94a3b8;
 }
 
 .stat-box strong {
@@ -1103,7 +1105,7 @@ select:focus {
 
 .stat-desc {
   font-size: 11px;
-  color: var(--text-muted);
+  color: #94a3b8;
 }
 
 /* VIEW 2: Batch Analytics Styling */
@@ -1236,11 +1238,11 @@ select:focus {
 }
 
 .analysis-table th {
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 1.2px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: #94a3b8;
 }
 
 .analysis-table td {
@@ -1258,9 +1260,11 @@ select:focus {
   background-color: rgba(255, 255, 255, 0.02);
 }
 
+
+
 .analysis-scroll {
-  max-height: calc(100vh - 250px);
-  min-height: 600px;
+  max-height: calc(100vh - 120px);
+  min-height: 750px;
   overflow: auto;
   -webkit-overflow-scrolling: touch;
 }
