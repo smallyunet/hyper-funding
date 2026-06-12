@@ -4,6 +4,8 @@ const HOURS_PER_YEAR = 24 * 365;
 const HISTORY_CACHE_PREFIX = "hyperFunding.history.v1";
 const HISTORY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const HISTORY_CONCURRENCY = 3;
+const FUNDING_HISTORY_CHUNK_HOURS = 480;
+const FUNDING_HISTORY_STEP_MS = 60 * 60 * 1000;
 
 const state = {
   rows: [],
@@ -467,8 +469,14 @@ async function analyzeTopMarkets() {
     return;
   }
 
-  const limit = Number(elements.analysisLimitSelect.value) || 10;
-  const symbols = state.filteredRows.slice(0, limit).map((row) => row.symbol);
+  const limitValue = elements.analysisLimitSelect.value;
+  const selectedRows =
+    limitValue === "all"
+      ? state.filteredRows
+      : state.filteredRows.slice(0, Number(limitValue) || 10);
+  const symbols = selectedRows.map((row) => row.symbol);
+  const scopeText = limitValue === "all" ? "all filtered rows" : `first ${symbols.length} row(s)`;
+  setAnalysisStatus(`Using ${scopeText} from current Market Board filters and sort`);
   await analyzeSymbols(symbols);
 }
 
@@ -524,6 +532,21 @@ async function fetchFundingHistory(symbol, days) {
 
   const endTime = Date.now();
   const startTime = endTime - days * 24 * 60 * 60 * 1000;
+  const chunkMs = FUNDING_HISTORY_CHUNK_HOURS * FUNDING_HISTORY_STEP_MS;
+  const chunks = [];
+
+  for (let cursor = startTime; cursor < endTime; cursor += chunkMs) {
+    const chunkEnd = Math.min(cursor + chunkMs - 1, endTime);
+    const chunk = await fetchFundingHistoryChunk(symbol, cursor, chunkEnd);
+    chunks.push(...chunk);
+  }
+
+  const history = dedupeAndSortHistory(chunks).filter((item) => item.time >= startTime && item.time <= endTime);
+  writeHistoryCache(cacheKey, history);
+  return history;
+}
+
+async function fetchFundingHistoryChunk(symbol, startTime, endTime) {
   const response = await fetch(API_URL, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -539,9 +562,17 @@ async function fetchFundingHistory(symbol, days) {
     throw new Error(`History ${symbol} failed with HTTP ${response.status}`);
   }
 
-  const history = await response.json();
-  writeHistoryCache(cacheKey, history);
-  return history;
+  return response.json();
+}
+
+function dedupeAndSortHistory(history) {
+  const byTime = new Map();
+  history.forEach((item) => {
+    const time = Number(item.time);
+    if (!Number.isFinite(time)) return;
+    byTime.set(time, { ...item, time });
+  });
+  return [...byTime.values()].sort((a, b) => a.time - b.time);
 }
 
 function summarizeFundingHistory(symbol, history) {
