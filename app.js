@@ -269,7 +269,7 @@ function renderAnalysis() {
 }
 
 // Select a single symbol to show in the right-hand panel & render Chart
-async function selectSymbol(symbol) {
+async function selectSymbol(symbol, isManual = false) {
   state.selectedSymbol = symbol;
   
   // Highlight active row in table
@@ -298,6 +298,13 @@ async function selectSymbol(symbol) {
   // Fetch and load historical chart
   const windowDays = Number(elements.detailHistoryWindowSelect.value) || 7;
   await loadHistoryData(symbol, windowDays);
+
+  if (isManual && window.innerWidth <= 1100) {
+    const detailPanel = document.getElementById("detailPanel");
+    if (detailPanel) {
+      detailPanel.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }
 }
 
 // Update live metrics on the detail card without refreshing graph
@@ -841,7 +848,7 @@ elements.fundingRows.addEventListener("click", (event) => {
   if (!row) return;
   
   const symbol = row.dataset.symbol;
-  selectSymbol(symbol);
+  selectSymbol(symbol, true);
 });
 
 // Batch Analytics comparison table row click -> select and switch view
@@ -855,7 +862,7 @@ elements.analysisRows.addEventListener("click", (event) => {
   const displaySymbol = symbolCell.querySelector("span:last-child").textContent;
   const match = state.rows.find(r => r.displaySymbol === displaySymbol);
   if (match) {
-    selectSymbol(match.symbol);
+    selectSymbol(match.symbol, true);
     switchTab("viewMarketBoard");
   }
 });

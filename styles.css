@@ -393,6 +393,12 @@ h1 {
   align-items: start;
 }
 
+.split-right {
+  position: sticky;
+  top: 24px;
+  align-self: start;
+}
+
 .panel-card {
   background: var(--panel-bg);
   border: 1px solid var(--panel-border);
@@ -611,14 +617,16 @@ select:focus {
 
 /* Market Scroll Table */
 .table-scroll {
-  overflow-y: auto;
+  overflow: auto;
   max-height: calc(100vh - 250px);
   min-height: 700px;
   width: 100%;
+  -webkit-overflow-scrolling: touch;
 }
 
 .market-table {
   width: 100%;
+  min-width: 750px;
   border-collapse: separate;
   border-spacing: 0;
   text-align: left;
@@ -1116,6 +1124,7 @@ select:focus {
 /* Batch Table Styles */
 .analysis-table {
   width: 100%;
+  min-width: 750px;
   border-collapse: separate;
   border-spacing: 0;
   text-align: left;
@@ -1161,7 +1170,8 @@ select:focus {
 .analysis-scroll {
   max-height: calc(100vh - 250px);
   min-height: 600px;
-  overflow-y: auto;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* RESPONSIVE DESIGN */
@@ -1186,9 +1196,7 @@ select:focus {
   }
   
   .split-right {
-    position: sticky;
-    bottom: 0;
-    z-index: 10;
+    position: static;
   }
   
   .detail-panel {
@@ -1222,13 +1230,17 @@ select:focus {
   }
   
   .metrics-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
     gap: 12px;
   }
   
   .control-strip {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
     gap: 12px;
+  }
+  
+  .search-box {
+    grid-column: span 2;
   }
   
   .segmented {
@@ -1288,6 +1300,23 @@ select:focus {
   }
   
   .detail-metrics-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  
+  .sub-metric-card {
+    padding: 8px 10px;
+  }
+  
+  .sub-metric-card strong {
+    font-size: 12px;
+  }
+
+  .metric-panel strong {
+    font-size: 20px;
+  }
+
+  .metric-panel {
+    padding: 14px 16px;
   }
 }
