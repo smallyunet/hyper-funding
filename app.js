@@ -1,11 +1,13 @@
 const API_URL = "https://api.hyperliquid.xyz/info";
 const REFRESH_MS = 30_000;
 const HOURS_PER_YEAR = 24 * 365;
-const HISTORY_CACHE_PREFIX = "hyperFunding.history.v1";
+const HISTORY_CACHE_PREFIX = "hyperFunding.history.v2";
 const HISTORY_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 const HISTORY_CONCURRENCY = 3;
 const FUNDING_HISTORY_CHUNK_HOURS = 480;
 const FUNDING_HISTORY_STEP_MS = 60 * 60 * 1000;
+const HISTORY_CHUNK_RETRIES = 3;
+const HISTORY_RETRY_DELAY_MS = 800;
 
 const state = {
   rows: [],
@@ -261,7 +263,7 @@ function renderAnalysis() {
           <td class="num">${formatPercent(row.volatility)}</td>
           <td class="num">${formatPercent(row.directionHitRate)}</td>
           <td class="num">${row.positiveCount} / ${row.negativeCount}</td>
-          <td class="num">${row.samples}</td>
+          <td class="num">${row.samples} (${formatSampleDays(row.sampleDays)})</td>
         </tr>
       `;
     })
@@ -577,22 +579,42 @@ async function fetchFundingHistory(symbol, days) {
 }
 
 async function fetchFundingHistoryChunk(symbol, startTime, endTime) {
-  const response = await fetch(API_URL, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      type: "fundingHistory",
-      coin: symbol,
-      startTime,
-      endTime,
-    }),
-  });
+  let lastError;
 
-  if (!response.ok) {
-    throw new Error(`History ${symbol} failed with HTTP ${response.status}`);
+  for (let attempt = 1; attempt <= HISTORY_CHUNK_RETRIES; attempt += 1) {
+    try {
+      const response = await fetch(API_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: "fundingHistory",
+          coin: symbol,
+          startTime,
+          endTime,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (!Array.isArray(data)) {
+        throw new Error("Unexpected history response");
+      }
+
+      return data;
+    } catch (error) {
+      lastError = error;
+      if (attempt < HISTORY_CHUNK_RETRIES) {
+        await sleep(HISTORY_RETRY_DELAY_MS * attempt);
+      }
+    }
   }
 
-  return response.json();
+  const from = new Date(startTime).toISOString();
+  const to = new Date(endTime).toISOString();
+  throw new Error(`History ${symbol} failed for ${from} - ${to}: ${lastError?.message ?? "unknown error"}`);
 }
 
 function dedupeAndSortHistory(history) {
@@ -630,8 +652,19 @@ function summarizeFundingHistory(symbol, history) {
     positiveCount,
     negativeCount,
     samples: values.length,
+    sampleDays: values.length / 24,
     score,
   };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatSampleDays(days) {
+  if (!Number.isFinite(days)) return "--";
+  if (days < 1) return `${(days * 24).toFixed(0)}h`;
+  return `${days.toFixed(1)}d`;
 }
 
 function mergeAnalysisRows(rows) {
