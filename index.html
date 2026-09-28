@@ -80,6 +80,10 @@
           <svg class="tab-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M12 20V10M18 20V4M6 20v-4"/></svg>
           Batch Analytics
         </button>
+        <button class="tab-btn" id="tabSymbolAnalysis" type="button" role="tab" aria-selected="false" data-target="viewSymbolAnalysis">
+          <svg class="tab-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 3v18h18M7 15l4-5 3 2 5-7"/></svg>
+          Symbol Analysis
+        </button>
       </nav>
 
       <!-- VIEW 1: Market Board (Split Layout) -->
@@ -160,6 +164,7 @@
                       <th class="num">Open Interest</th>
                       <th class="num">24h Volume</th>
                       <th class="num">Max Lev</th>
+                      <th>Analysis</th>
                     </tr>
                   </thead>
                   <tbody id="fundingRows">
@@ -278,9 +283,9 @@
                   <h3>History Analytics Summary</h3>
                   <div class="detail-stats-grid">
                     <div class="stat-box">
-                      <span class="stat-label">Stability Score</span>
+                      <span class="stat-label">Funding Score</span>
                       <strong id="detailScore">--</strong>
-                      <span class="stat-desc">Stability index (0-100)</span>
+                      <span class="stat-desc">Shown for complete history only</span>
                     </div>
                     <div class="stat-box">
                       <span class="stat-label">Avg. Funding Rate</span>
@@ -326,7 +331,8 @@
           <div class="analysis-header">
             <div>
               <h2>Batch History Comparison</h2>
-              <p id="analysisStatus">Uses the current Market Board filters and sort order</p>
+              <p id="analysisConfig">Uses the current Market Board filters and sort order</p>
+              <p id="analysisStatus" role="status">Run analysis to load historical samples.</p>
             </div>
             <div class="analysis-actions">
               <label class="select-field compact-field">
@@ -356,6 +362,7 @@
                 <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2.5" fill="none" class="btn-icon"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
                 Analyze Current Top
               </button>
+              <button class="text-button secondary" id="cancelAnalysisButton" type="button" disabled>Cancel</button>
               <button class="text-button secondary" id="clearHistoryCacheButton" type="button">Clear Cache</button>
             </div>
           </div>
@@ -377,7 +384,7 @@
                 <strong id="bestScore">--</strong>
                 <span class="score-symbol" id="bestScoreSymbol">--</span>
               </div>
-              <span class="score-sub">highest stability rating</span>
+              <span class="score-sub">highest score with complete history</span>
             </article>
             <article class="score-panel">
               <span class="metric-label">Highest Avg APR</span>
@@ -385,7 +392,7 @@
                 <strong id="bestAvgApr">--</strong>
                 <span class="score-symbol" id="bestAvgAprSymbol">--</span>
               </div>
-              <span class="score-sub">highest absolute historical yield</span>
+              <span class="score-sub">highest positive signed APR with complete history</span>
             </article>
           </div>
 
@@ -394,21 +401,83 @@
               <thead>
                 <tr>
                   <th>Symbol</th>
-                  <th class="num">Stability Score</th>
+                  <th class="num">Funding Score</th>
                   <th class="num">Avg / Hour</th>
                   <th class="num">Avg APR</th>
                   <th class="num">Volatility (SD)</th>
                   <th class="num">Direction Hit Rate</th>
                   <th class="num">Pos / Neg</th>
-                  <th class="num">Samples</th>
+                  <th class="num">Coverage</th>
+                  <th>Analysis</th>
                 </tr>
               </thead>
               <tbody id="analysisRows">
                 <tr>
-                  <td colspan="8" class="empty-cell">Run history analysis from the controls above or a table row</td>
+                  <td colspan="9" class="empty-cell">Run history analysis from the controls above or a table row</td>
                 </tr>
               </tbody>
             </table>
+          </div>
+        </section>
+      </div>
+
+      <!-- VIEW 3: Single symbol history -->
+      <div class="view-content" id="viewSymbolAnalysis">
+        <section class="panel-card analysis-shell" aria-label="Single symbol analysis">
+          <div class="analysis-header">
+            <div>
+              <p class="eyebrow">XYZ MARKET HISTORY</p>
+              <h2 id="symbolAnalysisTitle">Symbol Analysis</h2>
+              <p id="symbolAnalysisStatus" role="status">Select a symbol to inspect historical funding samples.</p>
+            </div>
+            <div class="analysis-actions">
+              <label class="select-field compact-field">
+                <span>Symbol</span>
+                <select id="symbolAnalysisSelect" aria-label="Symbol to analyze"></select>
+              </label>
+              <label class="select-field compact-field">
+                <span>History Window</span>
+                <select id="symbolHistoryWindowSelect">
+                  <option value="7">7d</option>
+                  <option value="14">14d</option>
+                  <option value="30">30d</option>
+                  <option value="60">60d</option>
+                  <option value="90">90d</option>
+                  <option value="180">180d</option>
+                  <option value="365">1y</option>
+                </select>
+              </label>
+              <button class="text-button primary-btn" id="analyzeSymbolButton" type="button">Analyze Symbol</button>
+            </div>
+          </div>
+
+          <div class="symbol-analysis-body">
+            <p class="analysis-note">Historical funding samples only. APR is the arithmetic mean hourly rate × 8,760, annualized for comparison; it is not realized P&amp;L or a trade simulation. The blue line uses the running mean from the first available sample.</p>
+            <div class="symbol-summary-grid" id="symbolSummaryGrid">
+              <article class="stat-box"><span class="stat-label">Avg Funding / Hr</span><strong id="symbolAvgFunding">--</strong></article>
+              <article class="stat-box"><span class="stat-label">Avg APR Est.</span><strong id="symbolAvgApr">--</strong></article>
+              <article class="stat-box"><span class="stat-label">Volatility (SD)</span><strong id="symbolVolatility">--</strong></article>
+              <article class="stat-box"><span class="stat-label">Funding Score</span><strong id="symbolScore">--</strong></article>
+              <article class="stat-box"><span class="stat-label">Direction Hit Rate</span><strong id="symbolHitRate">--</strong></article>
+              <article class="stat-box"><span class="stat-label">Positive / Negative</span><strong id="symbolDirectionCount">--</strong></article>
+              <article class="stat-box"><span class="stat-label">Samples</span><strong id="symbolSampleCount">--</strong></article>
+              <article class="stat-box"><span class="stat-label">Available Span</span><strong id="symbolAvailableSpan">--</strong></article>
+            </div>
+            <div class="symbol-chart-heading">
+              <div><h3>Funding and Running Avg APR</h3><p id="symbolChartRange">--</p></div>
+              <div class="symbol-chart-legend"><span class="legend-rate">Funding / Hr</span><span class="legend-apr">Running Avg APR</span></div>
+            </div>
+            <div class="symbol-chart-container"><canvas id="symbolAnalysisChart" aria-label="Hourly funding and running average APR chart" role="img"></canvas></div>
+            <div class="symbol-table-heading">
+              <div><h3>Hourly Samples</h3><p>Newest first · UTC timestamps</p></div>
+              <div class="symbol-pagination"><button class="text-button secondary" id="symbolPrevPage" type="button">Previous</button><span id="symbolPageStatus">--</span><button class="text-button secondary" id="symbolNextPage" type="button">Next</button></div>
+            </div>
+            <div class="table-scroll symbol-table-scroll">
+              <table class="analysis-table">
+                <thead><tr><th>Time (UTC)</th><th class="num">Funding / Hr</th><th class="num">Hourly Rate Annualized</th><th class="num">Running Avg / Hr</th><th class="num">Running Avg APR</th></tr></thead>
+                <tbody id="symbolHistoryRows"><tr><td colspan="5" class="empty-cell">Select a symbol to load history</td></tr></tbody>
+              </table>
+            </div>
           </div>
         </section>
       </div>
