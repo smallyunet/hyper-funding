@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- ChartJS for Funding History Graphs -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=20260929-pairs-list" />
+    <link rel="stylesheet" href="./styles.css?v=20260929-stock-pairs" />
   </head>
   <body>
     <!-- Background grid decoration -->
@@ -496,23 +496,23 @@
             <button class="text-button primary-btn" id="simRunButton" type="button">Refresh &amp; Simulate</button>
           </div>
           <div class="symbol-analysis-body">
-            <p class="analysis-note">Choose a current USDC spot / main-dex perpetual pair. The list checks known spot token IDs, live mid-price proximity and spot volume before showing a pair; matching prices do not guarantee an executable hedge. Historical funding rates are observed; trade costs and P&amp;L are a current-quote scenario, not a historical trade or forecast.</p>
+            <p class="analysis-note">Choose a tokenized US stock xStock spot / XYZ stock perpetual pair. The list pins the spot token ID and checks current quotes; rows without usable quotes remain visible but cannot be simulated. Historical funding rates are observed; trade costs and P&amp;L are a current-quote scenario, not a historical trade or forecast.</p>
             <div class="sim-input-grid">
-              <label class="select-field"><span>Pair</span><select id="simPair"><option value="PURR">Loading pairs...</option></select></label>
+              <label class="select-field"><span>Stock pair</span><select id="simPair"><option value="">Loading pairs...</option></select></label>
               <label class="select-field"><span>History window</span><select id="simWindow"><option value="7">7d</option><option value="14">14d</option><option value="30">30d</option><option value="60">60d</option><option value="90">90d</option><option value="180">180d</option><option value="365">1y</option></select></label>
               <label class="number-field"><span>Initial capital (USDC)</span><input id="simCapital" type="number" min="100" step="100" value="10000" /></label>
               <label class="number-field"><span>Spot taker fee (%)</span><input id="simSpotFee" type="number" min="0" max="10" step="0.001" value="0.07" /></label>
               <label class="number-field"><span>Perp taker fee (%)</span><input id="simPerpFee" type="number" min="0" max="10" step="0.001" value="0.045" /></label>
             </div>
-            <p class="sim-source-note" id="simPairStatus">Eligible pairs load from current Hyperliquid spot and perpetual markets.</p>
-            <div class="symbol-table-heading"><div><h3>Eligible Pairs</h3><p>Select a row to rerun the simulation with that market.</p></div></div>
+            <p class="sim-source-note" id="simPairStatus">Tokenized US stock pairs load from current Hyperliquid spot and XYZ perpetual markets.</p>
+            <div class="symbol-table-heading"><div><h3>Tokenized US Stock Pairs</h3><p>Choose an available row to rerun the simulation. Unavailable rows show the quote check that failed.</p></div></div>
             <div class="table-scroll sim-pair-scroll">
               <table class="analysis-table">
                 <thead><tr><th>Pair</th><th class="num">Spot mid</th><th class="num">Perp mid</th><th class="num">Perp − spot</th><th class="num">Spot 24h vol</th><th>Action</th></tr></thead>
                 <tbody id="simPairRows"><tr><td colspan="6" class="empty-cell">Load markets to see eligible pairs</td></tr></tbody>
               </table>
             </div>
-            <p class="sim-source-note">Default fees are Hyperliquid base-tier taker rates; edit them for your account. Half the capital is reserved for spot and half for 1× perp margin. No borrowing, leverage, reinvestment, future price move or liquidation is modeled.</p>
+            <p class="sim-source-note">Fees are editable estimates; verify your account's spot and XYZ perp fees, including any deployer surcharge. Half the capital is reserved for spot and half for 1× perp margin. No borrowing, leverage, reinvestment, future price move or liquidation is modeled.</p>
             <div class="sim-price-grid">
               <article class="stat-box"><span class="stat-label">Spot bid / ask</span><strong id="simSpotQuote">--</strong></article>
               <article class="stat-box"><span class="stat-label">Perp bid / ask</span><strong id="simPerpQuote">--</strong></article>
@@ -540,6 +540,6 @@
       </div>
     </main>
 
-    <script src="./app.js?v=20260929-pairs-list"></script>
+    <script src="./app.js?v=20260929-stock-pairs"></script>
   </body>
 </html>

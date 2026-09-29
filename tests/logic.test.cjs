@@ -89,32 +89,34 @@ test('older batch result cannot overwrite a cancelled run', async () => {
   assert.equal(node('analysisStatus').textContent, 'changed');
 });
 
-test('simulator joins spot contexts by coin and validates token identity, volume and price', () => {
-  const purr = { name: 'PURR/USDC', index: 0, isCanonical: true, tokens: [1, 0] };
-  const hype = { name: '@107', index: 107, tokens: [150, 0] };
-  context.__spot = [{ universe: [purr, hype], tokens: [
+test('simulator lists only pinned xStock spots against XYZ stock perps', () => {
+  context.__spot = [{ universe: [
+    {name:'@702',index:702,tokens:[2,0]},
+    {name:'@706',index:706,tokens:[3,0]},
+    {name:'@713',index:713,tokens:[4,0]},
+    {name:'@1',index:1,tokens:[5,0]},
+  ], tokens: [
     {index:0,name:'USDC',isCanonical:true},
-    {index:1,name:'PURR',tokenId:'0xc1fb593aeffbeb02f85e0308e9956a90',szDecimals:0},
-    {index:150,name:'HYPE',tokenId:'0x0d01dc56dcaaca66ad901c959b4011ec',szDecimals:2},
+    {index:2,name:'NVDAX',tokenId:'0x8e3a7531199e3f0d6e616a1f9edae9a3',fullName:'Wrapped NVIDIA xStock',szDecimals:2},
+    {index:3,name:'MUX',tokenId:'0x6679db5a5be138456cf95b1fc7e870a5',fullName:'Wrapped Micron Technology xStock',szDecimals:2},
+    {index:4,name:'AAPLX',tokenId:'0xc7fe8485e778ce51cf9df81a1c84bfea',fullName:'Wrapped Apple xStock',szDecimals:2},
+    {index:5,name:'NVDAX',tokenId:'imposter',fullName:'Wrapped NVIDIA xStock',szDecimals:2},
   ] }, [
-    {coin:'@107',midPx:'100',dayNtlVlm:'1000000'},
-    {coin:'@105',midPx:'0.1',dayNtlVlm:'1000000'},
-    {coin:'PURR/USDC',midPx:'1',dayNtlVlm:'100000'},
+    {coin:'@706',midPx:'1065',dayNtlVlm:'20000'},
+    {coin:'@713',midPx:null,dayNtlVlm:'0'},
+    {coin:'@702',midPx:'230',dayNtlVlm:'20000'},
+    {coin:'@1',midPx:'230',dayNtlVlm:'1000000'},
   ]];
-  context.__perp = [{ universe: [{name:'PURR',szDecimals:0}, {name:'HYPE',szDecimals:2}] }, [{midPx:'1.01'}, {midPx:'100.01'}]];
-  let pairs = run('findSimulatorPairs(__spot,__perp)');
-  assert.deepEqual(Array.from(pairs, (pair) => pair.perp), ['HYPE', 'PURR']);
-  assert.equal(pairs[0].spotMid, 100);
-  assert.equal(pairs[0].spotCoin, '@107');
-  purr.isCanonical = false;
-  pairs = run('findSimulatorPairs(__spot,__perp)');
-  assert.deepEqual(Array.from(pairs, (pair) => pair.perp), ['HYPE']);
-  purr.isCanonical = true;
-  context.__spot[0].tokens[2].tokenId = 'wrong-token';
-  assert.deepEqual(Array.from(run('findSimulatorPairs(__spot,__perp)'), (pair) => pair.perp), ['PURR']);
-  context.__spot[0].tokens[2].tokenId = '0x0d01dc56dcaaca66ad901c959b4011ec';
-  context.__spot[1][0].midPx = '50';
-  assert.deepEqual(Array.from(run('findSimulatorPairs(__spot,__perp)'), (pair) => pair.perp), ['PURR']);
+  context.__perp = [{ universe: [
+    {name:'xyz:NVDA',szDecimals:2}, {name:'xyz:MU',szDecimals:2}, {name:'xyz:AAPL',szDecimals:2},
+    {name:'NVDA',szDecimals:2},
+  ] }, [{midPx:'231'}, {midPx:'1066'}, {midPx:'330'}, {midPx:'230'}]];
+  const pairs = run('findSimulatorPairs(__spot,__perp)');
+  assert.deepEqual(Array.from(pairs, (pair) => pair.perp), ['xyz:NVDA', 'xyz:MU', 'xyz:AAPL']);
+  assert.equal(pairs.find((pair) => pair.perp === 'xyz:NVDA').spotCoin, '@702');
+  assert.equal(pairs.find((pair) => pair.perp === 'xyz:AAPL').reason, 'No live midpoint');
+  context.__spot[0].tokens[1].tokenId = 'wrong-token';
+  assert.deepEqual(Array.from(run('findSimulatorPairs(__spot,__perp)'), (pair) => pair.perp), ['xyz:MU', 'xyz:AAPL']);
 });
 
 test('simulator includes four book fills, four taker fees and signed short funding', () => {

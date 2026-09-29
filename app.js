@@ -15,19 +15,12 @@ const HISTORY_RETRY_DELAY_MS = 1_000;
 const HISTORY_RATE_LIMIT_DELAY_MS = 8_000;
 const HISTORY_MAX_RETRY_DELAY_MS = 60_000;
 const SIMULATOR_PAIRS = [
-  { spotToken: "PURR", tokenId: "0xc1fb593aeffbeb02f85e0308e9956a90", perp: "PURR", label: "PURR", kind: "native" },
-  { spotToken: "HYPE", tokenId: "0x0d01dc56dcaaca66ad901c959b4011ec", perp: "HYPE", label: "HYPE", kind: "native" },
-  { spotToken: "UBTC", tokenId: "0x8f254b963e8468305d409b33aa137c67", perp: "BTC", label: "BTC", kind: "unit" },
-  { spotToken: "UETH", tokenId: "0xe1edd30daaf5caac3fe63569e24748da", perp: "ETH", label: "ETH", kind: "unit" },
-  { spotToken: "USOL", tokenId: "0x49b67c39f5566535de22b29b0e51e685", perp: "SOL", label: "SOL", kind: "unit" },
-  { spotToken: "UFART", tokenId: "0x7650808198966e4285687d3deb556ccc", perp: "FARTCOIN", label: "FARTCOIN", kind: "unit" },
-  { spotToken: "UPUMP", tokenId: "0x544e60f98a36d7b22c0fb5824b84f795", perp: "PUMP", label: "PUMP", kind: "unit" },
-  { spotToken: "UUUSPX", tokenId: "0x2ff71b802a6788a052c7f1a58ec863af", perp: "SPX", label: "SPX", kind: "unit" },
-  { spotToken: "UENA", tokenId: "0x593494b6af79172fa983a0cf1c88e0e0", perp: "ENA", label: "ENA", kind: "unit" },
-  { spotToken: "UXPL", tokenId: "0x2c54c60600e1d786b2dfc139a38a5a99", perp: "XPL", label: "XPL", kind: "unit" },
-  { spotToken: "UMON", tokenId: "0x58dae745c8c5fed4012f35ef39829c2d", perp: "MON", label: "MON", kind: "unit" },
-  { spotToken: "UZEC", tokenId: "0x1c994ad3381d31c86c8c2d74ed89a365", perp: "ZEC", label: "ZEC", kind: "unit" },
-  { spotToken: "UAVAX", tokenId: "0x730fc3855fb77d2aa5a19dd7891dbe80", perp: "AVAX", label: "AVAX", kind: "unit" },
+  { spotToken: "NVDAX", tokenId: "0x8e3a7531199e3f0d6e616a1f9edae9a3", perp: "xyz:NVDA", label: "NVDA", fullName: "Wrapped NVIDIA xStock" },
+  { spotToken: "MUX", tokenId: "0x6679db5a5be138456cf95b1fc7e870a5", perp: "xyz:MU", label: "MU", fullName: "Wrapped Micron Technology xStock" },
+  { spotToken: "SNDKX", tokenId: "0xd6fc84b5c7f00265d3e588e9ee51461d", perp: "xyz:SNDK", label: "SNDK", fullName: "Wrapped Sandisk Corporation xStock" },
+  { spotToken: "TSLAX", tokenId: "0x4706026f1122523ec826f7f5b4c9b1a0", perp: "xyz:TSLA", label: "TSLA", fullName: "Wrapped Tesla xStock" },
+  { spotToken: "AAPLX", tokenId: "0xc7fe8485e778ce51cf9df81a1c84bfea", perp: "xyz:AAPL", label: "AAPL", fullName: "Wrapped Apple xStock" },
+  { spotToken: "CRCLX", tokenId: "0xaa7154840546392c529f4aaa40fb292b", perp: "xyz:CRCL", label: "CRCL", fullName: "Wrapped Circle xStock" },
 ];
 const SIMULATOR_MAX_MID_GAP = 0.05;
 const SIMULATOR_MIN_SPOT_DAILY_VOLUME = 10_000;
@@ -893,31 +886,32 @@ function findSimulatorPairs(spotData, perpData) {
   const usdc = [...tokens.values()].find((token) => token.name === "USDC" && token.isCanonical === true);
   if (!usdc) throw new Error("Canonical USDC spot token is unavailable");
   return SIMULATOR_PAIRS.flatMap((definition) => {
-    const token = [...tokens.values()].find((item) => item.name === definition.spotToken && item.tokenId === definition.tokenId);
+    const token = [...tokens.values()].find((item) => item.name === definition.spotToken &&
+      item.tokenId === definition.tokenId && item.fullName === definition.fullName);
     const pair = spotMeta.universe.find((item) => item.tokens?.[0] === token?.index && item.tokens?.[1] === usdc.index);
     const spot = pair && contexts.get(pair.name);
     const perp = perps.get(definition.perp);
     const spotMid = toNumber(spot?.midPx);
     const perpMid = toNumber(perp?.context?.midPx);
     const volume = toNumber(spot?.dayNtlVlm);
-    if (!token || !pair || !perp || perp.asset.isDelisted || !(spotMid > 0 && perpMid > 0) ||
-      !(volume >= SIMULATOR_MIN_SPOT_DAILY_VOLUME) ||
-      Math.abs(spotMid - perpMid) / perpMid > SIMULATOR_MAX_MID_GAP ||
-      (definition.kind === "native" && definition.perp === "PURR" && !pair.isCanonical)) return [];
+    if (!token || !pair || !perp || perp.asset.isDelisted) return [];
+    const reason = !(spotMid > 0 && perpMid > 0) ? "No live midpoint" :
+      volume < SIMULATOR_MIN_SPOT_DAILY_VOLUME ? "Low spot volume" :
+      Math.abs(spotMid - perpMid) / perpMid > SIMULATOR_MAX_MID_GAP ? "Price gap > 5%" : "";
     return [{ ...definition, spotCoin: pair.name, spotIndex: pair.index, spotMid, perpMid, volume,
-      sizeDecimals: Math.min(token.szDecimals, perp.asset.szDecimals) }];
-  }).sort((a, b) => a.label.localeCompare(b.label));
+      reason, eligible: !reason, sizeDecimals: Math.min(token.szDecimals, perp.asset.szDecimals) }];
+  }).sort((a, b) => Number(b.eligible) - Number(a.eligible));
 }
 
 function renderSimulatorPairList(pairs, selected) {
   elements.simPairRows.innerHTML = pairs.length ? pairs.map((pair) => `
     <tr class="sim-pair-row ${pair.perp === selected ? "selected" : ""}">
-      <td><strong>${escapeHtml(pair.label)}</strong> <span class="stat-desc">${escapeHtml(pair.spotToken)}/USDC</span></td>
-      <td class="num">${formatNumber(pair.spotMid, pair.spotMid < 1 ? 6 : 2)}</td>
-      <td class="num">${formatNumber(pair.perpMid, pair.perpMid < 1 ? 6 : 2)}</td>
-      <td class="num">${signedPercent((pair.perpMid - pair.spotMid) / pair.spotMid)}</td>
+      <td><strong>${escapeHtml(pair.label)}</strong> <span class="stat-desc">${escapeHtml(pair.spotToken)}/USDC ↔ ${escapeHtml(pair.perp)}</span></td>
+      <td class="num">${pair.spotMid > 0 ? formatNumber(pair.spotMid, pair.spotMid < 1 ? 6 : 2) : "--"}</td>
+      <td class="num">${pair.perpMid > 0 ? formatNumber(pair.perpMid, pair.perpMid < 1 ? 6 : 2) : "--"}</td>
+      <td class="num">${pair.spotMid > 0 && pair.perpMid > 0 ? signedPercent((pair.perpMid - pair.spotMid) / pair.spotMid) : "--"}</td>
       <td class="num">${formatUsd(pair.volume)}</td>
-      <td><button class="text-button secondary" type="button" data-sim-pair="${escapeHtml(pair.perp)}" aria-pressed="${pair.perp === selected}">${pair.perp === selected ? "Selected" : "Simulate"}</button></td>
+      <td>${pair.eligible ? `<button class="text-button secondary" type="button" data-sim-pair="${escapeHtml(pair.perp)}" aria-pressed="${pair.perp === selected}">${pair.perp === selected ? "Selected" : "Simulate"}</button>` : `<span class="stat-desc">${escapeHtml(pair.reason)}</span>`}</td>
     </tr>`).join("") : `<tr><td colspan="6" class="empty-cell">No pairs currently pass the market checks</td></tr>`;
 }
 
@@ -1010,23 +1004,24 @@ async function runSimulator() {
     if (![7, 14, 30, 60, 90, 180, 365].includes(days)) throw new Error("Select a supported history window");
     const [spotData, perpData] = await Promise.all([
       fetchInfo({ type: "spotMetaAndAssetCtxs" }),
-      fetchInfo({ type: "metaAndAssetCtxs" }),
+      fetchInfo({ type: "metaAndAssetCtxs", dex: "xyz" }),
     ]);
     if (requestId !== state.simRequest) return;
     const pairs = findSimulatorPairs(spotData, perpData);
     state.simPairs = pairs;
-    elements.simPair.innerHTML = pairs.length ? pairs.map((pair) =>
+    const eligiblePairs = pairs.filter((pair) => pair.eligible);
+    elements.simPair.innerHTML = eligiblePairs.length ? eligiblePairs.map((pair) =>
       `<option value="${escapeHtml(pair.perp)}">${escapeHtml(pair.label)} · ${escapeHtml(pair.spotToken)}/USDC spot + ${escapeHtml(pair.perp)} perp</option>`
     ).join("") : `<option value="">No eligible pairs</option>`;
-    if (!pairs.length) {
+    if (!eligiblePairs.length) {
       renderSimulatorPairList(pairs, "");
-      throw new Error("No eligible spot/perp pairs meet the live market checks");
+      throw new Error("No tokenized US stock pairs meet the live market checks");
     }
-    const market = pairs.find((pair) => pair.perp === requestedPair) || (requestedPair === "PURR" ? pairs[0] : null);
+    const market = eligiblePairs.find((pair) => pair.perp === requestedPair) || eligiblePairs[0];
     if (!market) throw new Error(`${requestedPair} is no longer eligible; choose another pair`);
     elements.simPair.value = market.perp;
     renderSimulatorPairList(pairs, market.perp);
-    elements.simPairStatus.textContent = `${pairs.length} eligible pairs · ${market.spotToken}/USDC market ${market.spotCoin} · token ${market.tokenId} · 24h spot volume ${formatMoney(market.volume)}. ${market.kind === "unit" ? "This Unit-wrapped spot asset carries basis and redemption/bridge risk." : "Spot/perp basis and execution risk remain."}`;
+    elements.simPairStatus.textContent = `${eligiblePairs.length} of ${pairs.length} tokenized US stock pairs currently pass quote checks · ${market.spotToken}/USDC market ${market.spotCoin} · token ${market.tokenId} · 24h spot volume ${formatMoney(market.volume)}. Tokenized stock redemption, spot/perp basis and execution risk remain.`;
     const [spotRaw, perpRaw, history] = await Promise.all([
       fetchInfo({ type: "l2Book", coin: market.spotCoin }),
       fetchInfo({ type: "l2Book", coin: market.perp }),
