@@ -22,6 +22,20 @@ const SIMULATOR_PAIRS = [
   { spotToken: "AAPLX", tokenId: "0xc7fe8485e778ce51cf9df81a1c84bfea", perp: "xyz:AAPL", label: "AAPL", fullName: "Wrapped Apple xStock" },
   { spotToken: "CRCLX", tokenId: "0xaa7154840546392c529f4aaa40fb292b", perp: "xyz:CRCL", label: "CRCL", fullName: "Wrapped Circle xStock" },
 ];
+// These markets share a stock ticker with an XYZ perp, but their spot metadata
+// does not establish that they represent the same underlying or share unit.
+const SIMULATOR_TICKER_MATCHES = [
+  { spotToken: "AAPL", tokenId: "0xec340db435d4d90899e97655cb8e71f5", perp: "xyz:AAPL", label: "AAPL", fullName: null },
+  { spotToken: "AMZN", tokenId: "0xd35b9bc1770c7bdda96f65cf0f76d4d5", perp: "xyz:AMZN", label: "AMZN", fullName: null },
+  { spotToken: "AVGO", tokenId: "0xeba4707b8cce42965026c6863faca7d4", perp: "xyz:AVGO", label: "AVGO", fullName: null },
+  { spotToken: "CRCL", tokenId: "0x8b92defb1901e6be9384d365c4f306a4", perp: "xyz:CRCL", label: "CRCL", fullName: null },
+  { spotToken: "GOOGL", tokenId: "0xba48f5724be19bf0b127bb4c7fbeb9db", perp: "xyz:GOOGL", label: "GOOGL", fullName: null },
+  { spotToken: "HOOD", tokenId: "0xe101753dcfea619a512111d3ae54a592", perp: "xyz:HOOD", label: "HOOD", fullName: null },
+  { spotToken: "META", tokenId: "0x555659a2a856d42399cdde096eb998e9", perp: "xyz:META", label: "META", fullName: null },
+  { spotToken: "MSFT", tokenId: "0xf5559ee90ac19c61eb6379eb3b3dade8", perp: "xyz:MSFT", label: "MSFT", fullName: null },
+  { spotToken: "ORCL", tokenId: "0x92de6e7ea04b168f6acc93d18f3becce", perp: "xyz:ORCL", label: "ORCL", fullName: null },
+  { spotToken: "TSLA", tokenId: "0xc8a24412041cdc4a167e7d3568fb6ebd", perp: "xyz:TSLA", label: "TSLA", fullName: "Tesla - Wagyu.xyz" },
+];
 const SIMULATOR_MAX_MID_GAP = 0.05;
 const SIMULATOR_MIN_SPOT_DAILY_VOLUME = 10_000;
 
@@ -885,9 +899,10 @@ function findSimulatorPairs(spotData, perpData) {
   const perps = new Map(perpMeta.universe.map((asset, index) => [asset.name, { asset, context: perpContexts[index] }]));
   const usdc = [...tokens.values()].find((token) => token.name === "USDC" && token.isCanonical === true);
   if (!usdc) throw new Error("Canonical USDC spot token is unavailable");
-  return SIMULATOR_PAIRS.flatMap((definition) => {
+  return [...SIMULATOR_PAIRS, ...SIMULATOR_TICKER_MATCHES].flatMap((definition) => {
     const token = [...tokens.values()].find((item) => item.name === definition.spotToken &&
-      item.tokenId === definition.tokenId && item.fullName === definition.fullName);
+      item.tokenId === definition.tokenId &&
+      (definition.fullName === null ? item.fullName == null : item.fullName === definition.fullName));
     const pair = spotMeta.universe.find((item) => item.tokens?.[0] === token?.index && item.tokens?.[1] === usdc.index);
     const spot = pair && contexts.get(pair.name);
     const perp = perps.get(definition.perp);
@@ -895,9 +910,12 @@ function findSimulatorPairs(spotData, perpData) {
     const perpMid = toNumber(perp?.context?.midPx);
     const volume = toNumber(spot?.dayNtlVlm);
     if (!token || !pair || !perp || perp.asset.isDelisted) return [];
-    const reason = !(spotMid > 0 && perpMid > 0) ? "No live midpoint" :
-      volume < SIMULATOR_MIN_SPOT_DAILY_VOLUME ? "Low spot volume" :
-      Math.abs(spotMid - perpMid) / perpMid > SIMULATOR_MAX_MID_GAP ? "Price gap > 5%" : "";
+    const hasQuotes = spotMid > 0 && perpMid > 0;
+    const reason = [SIMULATOR_TICKER_MATCHES.includes(definition) ? "Ticker only; underlying unverified" : "",
+      !hasQuotes ? "No live midpoint" : "",
+      volume < SIMULATOR_MIN_SPOT_DAILY_VOLUME ? "Low spot volume" : "",
+      hasQuotes && Math.abs(spotMid - perpMid) / perpMid > SIMULATOR_MAX_MID_GAP ? "Price gap > 5%" : ""]
+      .filter(Boolean).join(" · ");
     return [{ ...definition, spotCoin: pair.name, spotIndex: pair.index, spotMid, perpMid, volume,
       reason, eligible: !reason, sizeDecimals: Math.min(token.szDecimals, perp.asset.szDecimals) }];
   }).sort((a, b) => Number(b.eligible) - Number(a.eligible));
@@ -1021,7 +1039,7 @@ async function runSimulator() {
     if (!market) throw new Error(`${requestedPair} is no longer eligible; choose another pair`);
     elements.simPair.value = market.perp;
     renderSimulatorPairList(pairs, market.perp);
-    elements.simPairStatus.textContent = `${eligiblePairs.length} of ${pairs.length} tokenized US stock pairs currently pass quote checks · ${market.spotToken}/USDC market ${market.spotCoin} · token ${market.tokenId} · 24h spot volume ${formatMoney(market.volume)}. Tokenized stock redemption, spot/perp basis and execution risk remain.`;
+    elements.simPairStatus.textContent = `${eligiblePairs.length} executable xStock pairs · ${pairs.length} US-stock ticker candidates listed · ${market.spotToken}/USDC market ${market.spotCoin} · token ${market.tokenId} · 24h spot volume ${formatMoney(market.volume)}. Tokenized stock redemption, spot/perp basis and execution risk remain.`;
     const [spotRaw, perpRaw, history] = await Promise.all([
       fetchInfo({ type: "l2Book", coin: market.spotCoin }),
       fetchInfo({ type: "l2Book", coin: market.perp }),

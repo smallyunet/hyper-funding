@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- ChartJS for Funding History Graphs -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=20260929-stock-pairs" />
+    <link rel="stylesheet" href="./styles.css?v=20260929-stock-pairs-expanded" />
   </head>
   <body>
     <!-- Background grid decoration -->
@@ -496,7 +496,7 @@
             <button class="text-button primary-btn" id="simRunButton" type="button">Refresh &amp; Simulate</button>
           </div>
           <div class="symbol-analysis-body">
-            <p class="analysis-note">Choose a tokenized US stock xStock spot / XYZ stock perpetual pair. The list pins the spot token ID and checks current quotes; rows without usable quotes remain visible but cannot be simulated. Historical funding rates are observed; trade costs and P&amp;L are a current-quote scenario, not a historical trade or forecast.</p>
+            <p class="analysis-note">Choose a tokenized US stock xStock spot / XYZ stock perpetual pair. The list also shows same-ticker stock candidates from Hyperliquid. Those are reference matches only until the spot's underlying and units are confirmed; rows without a verified pair or usable quotes cannot be simulated. Historical funding rates are observed; trade costs and P&amp;L are a current-quote scenario, not a historical trade or forecast.</p>
             <div class="sim-input-grid">
               <label class="select-field"><span>Stock pair</span><select id="simPair"><option value="">Loading pairs...</option></select></label>
               <label class="select-field"><span>History window</span><select id="simWindow"><option value="7">7d</option><option value="14">14d</option><option value="30">30d</option><option value="60">60d</option><option value="90">90d</option><option value="180">180d</option><option value="365">1y</option></select></label>
@@ -505,7 +505,7 @@
               <label class="number-field"><span>Perp taker fee (%)</span><input id="simPerpFee" type="number" min="0" max="10" step="0.001" value="0.045" /></label>
             </div>
             <p class="sim-source-note" id="simPairStatus">Tokenized US stock pairs load from current Hyperliquid spot and XYZ perpetual markets.</p>
-            <div class="symbol-table-heading"><div><h3>Tokenized US Stock Pairs</h3><p>Choose an available row to rerun the simulation. Unavailable rows show the quote check that failed.</p></div></div>
+            <div class="symbol-table-heading"><div><h3>US Stock Pair Candidates</h3><p>Choose a verified, available row to simulate. Other rows show the identity or quote check that failed.</p></div></div>
             <div class="table-scroll sim-pair-scroll">
               <table class="analysis-table">
                 <thead><tr><th>Pair</th><th class="num">Spot mid</th><th class="num">Perp mid</th><th class="num">Perp − spot</th><th class="num">Spot 24h vol</th><th>Action</th></tr></thead>
@@ -540,6 +540,6 @@
       </div>
     </main>
 
-    <script src="./app.js?v=20260929-stock-pairs"></script>
+    <script src="./app.js?v=20260929-stock-pairs-expanded"></script>
   </body>
 </html>
