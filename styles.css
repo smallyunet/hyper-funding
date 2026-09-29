@@ -1371,6 +1371,10 @@ select:focus {
 .sim-source-note { color: var(--text-muted); font-size: 12px; line-height: 1.6; margin: 0 0 18px; }
 .sim-net { border-color: rgba(167, 139, 250, .5); background: rgba(167, 139, 250, .09); }
 .sim-price-grid strong { font-size: 14px; overflow-wrap: anywhere; }
+.sim-pair-scroll { max-height: 330px; min-height: 0; margin-bottom: 18px; }
+.sim-pair-scroll .analysis-table { min-width: 760px; }
+.sim-pair-row.selected { background: rgba(59, 130, 246, .10); }
+.sim-pair-scroll .text-button { padding: 5px 10px; font-size: 11px; }
 
 .symbol-chart-container {
   height: 380px;

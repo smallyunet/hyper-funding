@@ -14,6 +14,23 @@ const HISTORY_REQUEST_INTERVAL_MS = 500;
 const HISTORY_RETRY_DELAY_MS = 1_000;
 const HISTORY_RATE_LIMIT_DELAY_MS = 8_000;
 const HISTORY_MAX_RETRY_DELAY_MS = 60_000;
+const SIMULATOR_PAIRS = [
+  { spotToken: "PURR", tokenId: "0xc1fb593aeffbeb02f85e0308e9956a90", perp: "PURR", label: "PURR", kind: "native" },
+  { spotToken: "HYPE", tokenId: "0x0d01dc56dcaaca66ad901c959b4011ec", perp: "HYPE", label: "HYPE", kind: "native" },
+  { spotToken: "UBTC", tokenId: "0x8f254b963e8468305d409b33aa137c67", perp: "BTC", label: "BTC", kind: "unit" },
+  { spotToken: "UETH", tokenId: "0xe1edd30daaf5caac3fe63569e24748da", perp: "ETH", label: "ETH", kind: "unit" },
+  { spotToken: "USOL", tokenId: "0x49b67c39f5566535de22b29b0e51e685", perp: "SOL", label: "SOL", kind: "unit" },
+  { spotToken: "UFART", tokenId: "0x7650808198966e4285687d3deb556ccc", perp: "FARTCOIN", label: "FARTCOIN", kind: "unit" },
+  { spotToken: "UPUMP", tokenId: "0x544e60f98a36d7b22c0fb5824b84f795", perp: "PUMP", label: "PUMP", kind: "unit" },
+  { spotToken: "UUUSPX", tokenId: "0x2ff71b802a6788a052c7f1a58ec863af", perp: "SPX", label: "SPX", kind: "unit" },
+  { spotToken: "UENA", tokenId: "0x593494b6af79172fa983a0cf1c88e0e0", perp: "ENA", label: "ENA", kind: "unit" },
+  { spotToken: "UXPL", tokenId: "0x2c54c60600e1d786b2dfc139a38a5a99", perp: "XPL", label: "XPL", kind: "unit" },
+  { spotToken: "UMON", tokenId: "0x58dae745c8c5fed4012f35ef39829c2d", perp: "MON", label: "MON", kind: "unit" },
+  { spotToken: "UZEC", tokenId: "0x1c994ad3381d31c86c8c2d74ed89a365", perp: "ZEC", label: "ZEC", kind: "unit" },
+  { spotToken: "UAVAX", tokenId: "0x730fc3855fb77d2aa5a19dd7891dbe80", perp: "AVAX", label: "AVAX", kind: "unit" },
+];
+const SIMULATOR_MAX_MID_GAP = 0.05;
+const SIMULATOR_MIN_SPOT_DAILY_VOLUME = 10_000;
 
 let historyRequestQueue = Promise.resolve();
 let lastHistoryRequestAt = 0;
@@ -50,6 +67,7 @@ const state = {
   symbolOptionsKey: "",
   simRequest: 0,
   simSnapshot: null,
+  simPairs: [],
   simChartInstance: null,
   activeView: "viewMarketBoard",
   autoBatchAnalysisStarted: false,
@@ -117,6 +135,9 @@ const elements = {
   simStatus: document.getElementById("simStatus"),
   simRunButton: document.getElementById("simRunButton"),
   simWindow: document.getElementById("simWindow"),
+  simPair: document.getElementById("simPair"),
+  simPairStatus: document.getElementById("simPairStatus"),
+  simPairRows: document.getElementById("simPairRows"),
   simCapital: document.getElementById("simCapital"),
   simSpotFee: document.getElementById("simSpotFee"),
   simPerpFee: document.getElementById("simPerpFee"),
@@ -858,22 +879,46 @@ async function fetchInfo(payload) {
   return response.json();
 }
 
-function validateSimulatorMarkets(spotData, perpData) {
+function findSimulatorPairs(spotData, perpData) {
   const [spotMeta, spotContexts] = spotData;
   const [perpMeta, perpContexts] = perpData;
-  const pairIndex = spotMeta?.universe?.findIndex((pair) => pair.name === "PURR/USDC" && pair.isCanonical === true);
-  const perpIndex = perpMeta?.universe?.findIndex((asset) => asset.name === "PURR");
-  if (pairIndex < 0 || perpIndex < 0 || !Array.isArray(spotContexts) || !Array.isArray(perpContexts)) {
-    throw new Error("Verified PURR spot/perp market is unavailable");
+  if (!Array.isArray(spotMeta?.universe) || !Array.isArray(spotMeta.tokens) ||
+    !Array.isArray(spotContexts) || !Array.isArray(perpMeta?.universe) ||
+    !Array.isArray(perpContexts) || perpMeta.universe.length !== perpContexts.length) {
+    throw new Error("Current spot/perp metadata is unavailable or misaligned");
   }
-  const pair = spotMeta.universe[pairIndex];
-  if (spotMeta.tokens?.[pair.tokens?.[0]]?.name !== "PURR" || spotMeta.tokens?.[pair.tokens?.[1]]?.name !== "USDC") {
-    throw new Error("Spot token identifiers no longer match PURR/USDC");
-  }
-  const spotMid = toNumber(spotContexts[pairIndex]?.midPx);
-  const perpMid = toNumber(perpContexts[perpIndex]?.midPx);
-  if (!(spotMid > 0 && perpMid > 0)) throw new Error("Current spot or perp midpoint is unavailable");
-  return { spotCoin: pair.name, spotMid, perpMid, sizeDecimals: perpMeta.universe[perpIndex].szDecimals };
+  const tokens = new Map(spotMeta.tokens.map((token) => [token.index, token]));
+  const contexts = new Map(spotContexts.map((context) => [context.coin, context]));
+  const perps = new Map(perpMeta.universe.map((asset, index) => [asset.name, { asset, context: perpContexts[index] }]));
+  const usdc = [...tokens.values()].find((token) => token.name === "USDC" && token.isCanonical === true);
+  if (!usdc) throw new Error("Canonical USDC spot token is unavailable");
+  return SIMULATOR_PAIRS.flatMap((definition) => {
+    const token = [...tokens.values()].find((item) => item.name === definition.spotToken && item.tokenId === definition.tokenId);
+    const pair = spotMeta.universe.find((item) => item.tokens?.[0] === token?.index && item.tokens?.[1] === usdc.index);
+    const spot = pair && contexts.get(pair.name);
+    const perp = perps.get(definition.perp);
+    const spotMid = toNumber(spot?.midPx);
+    const perpMid = toNumber(perp?.context?.midPx);
+    const volume = toNumber(spot?.dayNtlVlm);
+    if (!token || !pair || !perp || perp.asset.isDelisted || !(spotMid > 0 && perpMid > 0) ||
+      !(volume >= SIMULATOR_MIN_SPOT_DAILY_VOLUME) ||
+      Math.abs(spotMid - perpMid) / perpMid > SIMULATOR_MAX_MID_GAP ||
+      (definition.kind === "native" && definition.perp === "PURR" && !pair.isCanonical)) return [];
+    return [{ ...definition, spotCoin: pair.name, spotIndex: pair.index, spotMid, perpMid, volume,
+      sizeDecimals: Math.min(token.szDecimals, perp.asset.szDecimals) }];
+  }).sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function renderSimulatorPairList(pairs, selected) {
+  elements.simPairRows.innerHTML = pairs.length ? pairs.map((pair) => `
+    <tr class="sim-pair-row ${pair.perp === selected ? "selected" : ""}">
+      <td><strong>${escapeHtml(pair.label)}</strong> <span class="stat-desc">${escapeHtml(pair.spotToken)}/USDC</span></td>
+      <td class="num">${formatNumber(pair.spotMid, pair.spotMid < 1 ? 6 : 2)}</td>
+      <td class="num">${formatNumber(pair.perpMid, pair.perpMid < 1 ? 6 : 2)}</td>
+      <td class="num">${signedPercent((pair.perpMid - pair.spotMid) / pair.spotMid)}</td>
+      <td class="num">${formatUsd(pair.volume)}</td>
+      <td><button class="text-button secondary" type="button" data-sim-pair="${escapeHtml(pair.perp)}" aria-pressed="${pair.perp === selected}">${pair.perp === selected ? "Selected" : "Simulate"}</button></td>
+    </tr>`).join("") : `<tr><td colspan="6" class="empty-cell">No pairs currently pass the market checks</td></tr>`;
 }
 
 function parseBook(data, name) {
@@ -953,10 +998,13 @@ function resetSimulator() {
 
 async function runSimulator() {
   const requestId = ++state.simRequest;
+  const requestedPair = elements.simPair.value;
   state.simSnapshot = null;
   resetSimulator();
   elements.simRunButton.disabled = true;
   elements.simStatus.textContent = "Loading current books and historical funding samples...";
+  elements.simPairStatus.textContent = "Checking current eligible spot/perp pairs...";
+  elements.simPairRows.innerHTML = `<tr><td colspan="6" class="empty-cell">Checking current pairs...</td></tr>`;
   const days = Number(elements.simWindow.value);
   try {
     if (![7, 14, 30, 60, 90, 180, 365].includes(days)) throw new Error("Select a supported history window");
@@ -965,18 +1013,31 @@ async function runSimulator() {
       fetchInfo({ type: "metaAndAssetCtxs" }),
     ]);
     if (requestId !== state.simRequest) return;
-    const market = validateSimulatorMarkets(spotData, perpData);
+    const pairs = findSimulatorPairs(spotData, perpData);
+    state.simPairs = pairs;
+    elements.simPair.innerHTML = pairs.length ? pairs.map((pair) =>
+      `<option value="${escapeHtml(pair.perp)}">${escapeHtml(pair.label)} · ${escapeHtml(pair.spotToken)}/USDC spot + ${escapeHtml(pair.perp)} perp</option>`
+    ).join("") : `<option value="">No eligible pairs</option>`;
+    if (!pairs.length) {
+      renderSimulatorPairList(pairs, "");
+      throw new Error("No eligible spot/perp pairs meet the live market checks");
+    }
+    const market = pairs.find((pair) => pair.perp === requestedPair) || (requestedPair === "PURR" ? pairs[0] : null);
+    if (!market) throw new Error(`${requestedPair} is no longer eligible; choose another pair`);
+    elements.simPair.value = market.perp;
+    renderSimulatorPairList(pairs, market.perp);
+    elements.simPairStatus.textContent = `${pairs.length} eligible pairs · ${market.spotToken}/USDC market ${market.spotCoin} · token ${market.tokenId} · 24h spot volume ${formatMoney(market.volume)}. ${market.kind === "unit" ? "This Unit-wrapped spot asset carries basis and redemption/bridge risk." : "Spot/perp basis and execution risk remain."}`;
     const [spotRaw, perpRaw, history] = await Promise.all([
       fetchInfo({ type: "l2Book", coin: market.spotCoin }),
-      fetchInfo({ type: "l2Book", coin: "PURR" }),
-      fetchFundingHistory("PURR", days),
+      fetchInfo({ type: "l2Book", coin: market.perp }),
+      fetchFundingHistory(market.perp, days),
     ]);
     if (requestId !== state.simRequest) return;
-    const spotBook = parseBook(spotRaw, "Spot");
-    const perpBook = parseBook(perpRaw, "Perp");
+    const spotBook = parseBook(spotRaw, `${market.spotToken} spot`);
+    const perpBook = parseBook(perpRaw, `${market.perp} perp`);
     const points = buildSymbolAnalysisPoints(history);
-    const stats = summarizeFundingHistory("PURR", history);
-    if (!stats || !points.length) throw new Error("No valid PURR funding history is available");
+    const stats = summarizeFundingHistory(market.perp, history);
+    if (!stats || !points.length) throw new Error(`No valid ${market.perp} funding history is available`);
     state.simSnapshot = { market, spotBook, perpBook, points, stats, days, historyFetchedAt: history.fetchedAt, quoteFetchedAt: Date.now() };
     renderSimulator();
   } catch (error) {
@@ -1015,7 +1076,7 @@ function renderSimulator() {
   set("simSpotQuote", `${formatNumber(spotBook.bids[0].px, 5)} / ${formatNumber(spotBook.asks[0].px, 5)}`);
   set("simPerpQuote", `${formatNumber(perpBook.bids[0].px, 5)} / ${formatNumber(perpBook.asks[0].px, 5)}`);
   set("simBasis", signedPercent((market.perpMid - market.spotMid) / market.spotMid));
-  set("simPosition", `${formatNumber(result.quantity, market.sizeDecimals)} PURR · ${formatMoney(result.perpEntry)} short`);
+  set("simPosition", `${formatNumber(result.quantity, market.sizeDecimals)} ${market.label} · ${formatMoney(result.perpEntry)} short`);
   set("simFunding", formatSignedMoney(result.fundingUsd));
   set("simEntryFees", formatMoney(result.entryFees));
   set("simExitFees", formatMoney(result.exitFees));
@@ -1026,7 +1087,7 @@ function renderSimulator() {
   set("simSnapshot", `Quotes read ${formatUtc(snapshot.quoteFetchedAt)} UTC · Funding history read ${formatUtc(snapshot.historyFetchedAt)} UTC. Matched position reserves ${formatMoney(reservedCapital)} of ${formatMoney(capital)}; ${formatMoney(Math.max(0, capital - reservedCapital))} remains unallocated because the available book depth or 1× capital split limits the fill. All four fills use current order-book depth.`);
   set("simCoverage", `Coverage: ${simComplete ? "Complete" : "Partial"} · ${stats.samples}/${coverage.expectedSamples} requested hourly samples · ${coverage.missingSamples} internal gaps · available span ${formatSampleDays(coverage.spanHours / 24)}. Missing hours are not filled or projected.`);
   set("simChartRange", `${formatUtc(stats.firstSampleTime)} – ${formatUtc(stats.lastSampleTime)} UTC`);
-  elements.simStatus.textContent = `${simComplete ? "Complete" : "Partial"} historical replay · ${stats.samples} observed hours · current-book entry and hypothetical exit`;
+  elements.simStatus.textContent = `${market.label} · ${simComplete ? "Complete" : "Partial"} historical replay · ${stats.samples} observed hours · current-book entry and hypothetical exit`;
   renderSimulatorChart(result.curve);
 }
 
@@ -1770,6 +1831,13 @@ elements.tabSimulator.addEventListener("click", () => {
   if (!state.simSnapshot) runSimulator();
 });
 elements.simRunButton.addEventListener("click", runSimulator);
+elements.simPair.addEventListener("change", runSimulator);
+elements.simPairRows.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-sim-pair]");
+  if (!button || button.dataset.simPair === elements.simPair.value) return;
+  elements.simPair.value = button.dataset.simPair;
+  runSimulator();
+});
 elements.simWindow.addEventListener("change", runSimulator);
 for (const input of [elements.simCapital, elements.simSpotFee, elements.simPerpFee]) {
   input.addEventListener("input", renderSimulator);

@@ -26,7 +26,7 @@ The page calls Hyperliquid's public `info` endpoint from the browser:
 - Browser-side history analysis with `fundingHistory`.
 - Score selected or top-ranked markets by average funding, volatility, direction consistency, and estimated APR.
 - Open Symbol Analysis from either market table for one market's historical summary, hourly funding and cumulative funding chart, and paginated hourly samples.
-- Model a long-spot/short-perp PURR position in the Arbitrage Simulator tab with current order-book depth, historical hourly funding, editable capital and taker fees, and an estimated net P&L curve.
+- Choose from eligible long-spot/short-perp pairs in the Arbitrage Simulator tab, with current order-book depth, historical hourly funding, editable capital and taker fees, and an estimated net P&L curve.
 - Show requested versus available hourly coverage; only complete windows qualify for score ranking.
 - Limit funding-history requests with a conservative rolling API weight budget; cache current windows for 5 minutes, empty responses for 1 minute, and completed 480-hour chunks for 24 hours.
 
@@ -34,11 +34,13 @@ Symbol Analysis uses the same historical summary formula as Batch Analytics: ave
 
 Positive funding is paid by longs to shorts. The signed APR does not include position direction, basis, fees, borrow cost, or trading P&L. History responses are browser-local snapshots with their collection time shown in the UI.
 
-The simulator currently accepts only the canonical PURR/USDC spot pair and the default-dex PURR perpetual, with token IDs and market metadata checked on each run. Same-name XYZ perps and spot tokens are not presumed to represent the same underlying. It reserves half of initial capital for spot purchases and half for 1× perp margin, sizes equal token quantities from available order-book depth, and leaves any unused capital idle. Entry buys spot at asks and shorts perps at bids; hypothetical exit sells spot at bids and buys back perps at asks from the same current quote reads. Four taker fees are applied to filled notionals. Default fees are 0.07% spot and 0.045% perp, editable because account tiers differ. Short funding is modeled as the fixed current perp entry notional times each observed hourly funding rate. Net P&L is cumulative modeled funding plus the current-book round-trip price effect less entry and exit fees. It is not a historical execution, current account quote, future return, or realized P&L; incomplete history remains labeled partial.
+The simulator pairs main-dex perps with known Hyperliquid USDC spot token IDs: HYPE, PURR, and Unit-wrapped BTC, ETH, SOL, FARTCOIN, PUMP, SPX, ENA, XPL, MON, ZEC, and AVAX. Each run joins spot contexts by market `coin` (not array position), checks the exact base token ID, canonical USDC quote, live midpoint gap within 5%, and at least $10,000 spot 24h volume. The list therefore changes with market conditions. Same-name XYZ perps and unrelated spot tokens are excluded. Unit assets are wrapped spot representations and carry redemption/bridge risk; the quote filter alone is not proof of perfect hedge. The selected pair's order books are checked before showing a result.
+
+The model reserves half of initial capital for spot purchases and half for 1× perp margin, sizes equal token quantities from available order-book depth, and leaves any unused capital idle. Entry buys spot at asks and shorts perps at bids; hypothetical exit sells spot at bids and buys back perps at asks from the same current quote reads. Four taker fees are applied to filled notionals. Default fees are 0.07% spot and 0.045% perp, editable because account tiers differ. Short funding is modeled as the fixed current perp entry notional times each observed hourly funding rate. Net P&L is cumulative modeled funding plus the current-book round-trip price effect less entry and exit fees. It is not a historical execution, current account quote, future return, or realized P&L; incomplete history remains labeled partial.
 
 Sources: [Hyperliquid spot metadata](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint/spot), [order book and history API](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint), [fees](https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees), and [funding](https://hyperliquid.gitbook.io/hyperliquid-docs/trading/funding).
 
 ## Next Scope
 
-- Extend the verified same-asset pair registry when liquid canonical spot and matching perp markets become available.
+- Extend the pinned spot-token registry when further liquid, identified spot markets and matching perps become available.
 - Join account-specific fee and margin data for account-level estimates.

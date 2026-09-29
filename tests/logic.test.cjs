@@ -89,16 +89,32 @@ test('older batch result cannot overwrite a cancelled run', async () => {
   assert.equal(node('analysisStatus').textContent, 'changed');
 });
 
-test('simulator only accepts the canonical PURR/USDC spot paired with PURR perp', () => {
-  const pair = { name: 'PURR/USDC', isCanonical: true, tokens: [1, 0] };
-  context.__spot = [{ universe: [pair], tokens: [{name:'USDC'}, {name:'PURR'}] }, [{midPx:'1'}]];
-  context.__perp = [{ universe: [{name:'PURR',szDecimals:0}] }, [{midPx:'1.01'}]];
-  assert.equal(run('validateSimulatorMarkets(__spot,__perp).spotCoin'), 'PURR/USDC');
-  pair.isCanonical = false;
-  assert.throws(() => run('validateSimulatorMarkets(__spot,__perp)'), /unavailable/);
-  pair.isCanonical = true;
-  context.__spot[0].tokens[1].name = 'OTHER';
-  assert.throws(() => run('validateSimulatorMarkets(__spot,__perp)'), /identifiers/);
+test('simulator joins spot contexts by coin and validates token identity, volume and price', () => {
+  const purr = { name: 'PURR/USDC', index: 0, isCanonical: true, tokens: [1, 0] };
+  const hype = { name: '@107', index: 107, tokens: [150, 0] };
+  context.__spot = [{ universe: [purr, hype], tokens: [
+    {index:0,name:'USDC',isCanonical:true},
+    {index:1,name:'PURR',tokenId:'0xc1fb593aeffbeb02f85e0308e9956a90',szDecimals:0},
+    {index:150,name:'HYPE',tokenId:'0x0d01dc56dcaaca66ad901c959b4011ec',szDecimals:2},
+  ] }, [
+    {coin:'@107',midPx:'100',dayNtlVlm:'1000000'},
+    {coin:'@105',midPx:'0.1',dayNtlVlm:'1000000'},
+    {coin:'PURR/USDC',midPx:'1',dayNtlVlm:'100000'},
+  ]];
+  context.__perp = [{ universe: [{name:'PURR',szDecimals:0}, {name:'HYPE',szDecimals:2}] }, [{midPx:'1.01'}, {midPx:'100.01'}]];
+  let pairs = run('findSimulatorPairs(__spot,__perp)');
+  assert.deepEqual(Array.from(pairs, (pair) => pair.perp), ['HYPE', 'PURR']);
+  assert.equal(pairs[0].spotMid, 100);
+  assert.equal(pairs[0].spotCoin, '@107');
+  purr.isCanonical = false;
+  pairs = run('findSimulatorPairs(__spot,__perp)');
+  assert.deepEqual(Array.from(pairs, (pair) => pair.perp), ['HYPE']);
+  purr.isCanonical = true;
+  context.__spot[0].tokens[2].tokenId = 'wrong-token';
+  assert.deepEqual(Array.from(run('findSimulatorPairs(__spot,__perp)'), (pair) => pair.perp), ['PURR']);
+  context.__spot[0].tokens[2].tokenId = '0x0d01dc56dcaaca66ad901c959b4011ec';
+  context.__spot[1][0].midPx = '50';
+  assert.deepEqual(Array.from(run('findSimulatorPairs(__spot,__perp)'), (pair) => pair.perp), ['PURR']);
 });
 
 test('simulator includes four book fills, four taker fees and signed short funding', () => {
