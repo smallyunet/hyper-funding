@@ -1353,7 +1353,6 @@ select:focus {
 }
 
 .legend-rate::before { background: #10b981; }
-.legend-apr::before { background: #60a5fa; }
 .legend-cumulative::before { background: #f59e0b; }
 
 .symbol-chart-container {
