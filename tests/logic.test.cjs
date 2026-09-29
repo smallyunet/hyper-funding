@@ -147,6 +147,21 @@ test('midpoint simulator charges four fees and replays signed short funding', ()
   assert.ok(result.curve[0].netUsd > result.curve[1].netUsd);
 });
 
+test('exit basis convergence changes price P&L and exit perp fee', () => {
+  context.__points = [{time:1,rate:0.01,cumulativeRate:0.01}];
+  const unchanged = run('modelFundingArbitrage(__points,100,90,1000,0.001,0.002,0)');
+  const converged = run('modelFundingArbitrage(__points,100,90,1000,0.001,0.002,0,0)');
+  assert.equal(converged.quantity, 4);
+  assert.equal(unchanged.pricePnl, 0);
+  assert.equal(converged.perpExit, 400);
+  assert.equal(converged.pricePnl, -40);
+  assert.ok(Math.abs(converged.exitFees - 1.2) < 1e-9);
+  assert.ok(Math.abs(converged.netUsd - (3.6 - converged.entryFees - 1.2 - 40)) < 1e-9);
+  const widened = run('modelFundingArbitrage(__points,100,90,1000,0.001,0.002,0,-0.2)');
+  assert.equal(widened.pricePnl, 40);
+  assert.throws(() => run('modelFundingArbitrage(__points,100,90,1000,0.001,0.002,0,-1)'), /exit gap/);
+});
+
 test('midpoint simulator requires both prices and a tradable size increment', () => {
   context.__points = [{time:1,rate:0,cumulativeRate:0}];
   assert.throws(() => run('modelFundingArbitrage(__points,0,100,1000,0,0,0)'), /capital/);

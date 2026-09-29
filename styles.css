@@ -1366,6 +1366,15 @@ select:focus {
 }
 
 .sim-input-grid { align-items: end; }
+.sim-workspace { display: grid; grid-template-columns: minmax(370px, .85fr) minmax(0, 1.55fr); gap: 18px; margin: 20px 0 24px; align-items: stretch; }
+.sim-workspace-section { min-width: 0; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: rgba(15, 23, 42, .35); }
+.sim-workspace-section .symbol-table-heading { margin: 0 0 18px; }
+.sim-workspace-section .sim-input-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.sim-workspace-section .sim-input-grid .select-field:first-child { grid-column: 1 / -1; }
+.sim-workspace-section .sim-source-note { margin-bottom: 0; }
+.sim-workspace-section .sim-pair-scroll { max-height: 440px; margin-bottom: 12px; }
+.sim-results-heading { border-top: 1px solid var(--line); padding-top: 24px; margin-bottom: 12px; }
+.sim-results-heading h3 { font-size: 18px; margin: 4px 0 0; }
 .sim-price-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .sim-result-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 22px; }
 .sim-source-note { color: var(--text-muted); font-size: 12px; line-height: 1.6; margin: 0 0 18px; }
@@ -1435,6 +1444,7 @@ select:focus {
 }
 
 @media (max-width: 1100px) {
+  .sim-workspace { grid-template-columns: 1fr; }
   .symbol-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sim-price-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .split-layout {
@@ -1548,6 +1558,7 @@ select:focus {
 }
 
 @media (max-width: 480px) {
+  .sim-workspace-section .sim-input-grid { grid-template-columns: 1fr; }
   .sim-price-grid, .sim-result-grid { grid-template-columns: 1fr; }
   .detail-stats-grid {
     grid-template-columns: 1fr;

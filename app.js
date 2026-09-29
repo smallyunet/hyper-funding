@@ -146,6 +146,8 @@ const elements = {
   simCapital: document.getElementById("simCapital"),
   simSpotFee: document.getElementById("simSpotFee"),
   simPerpFee: document.getElementById("simPerpFee"),
+  simExitScenario: document.getElementById("simExitScenario"),
+  simExitBasis: document.getElementById("simExitBasis"),
   
   // Asset Detail elements
   detailPanelContent: document.getElementById("detailPanelContent"),
@@ -940,11 +942,11 @@ function renderSimulatorPairOptions(pairs) {
     `<option value="">No stock pairs available</option>`;
 }
 
-function modelFundingArbitrage(points, spotMid, perpMid, capital, spotFee, perpFee, sizeDecimals) {
+function modelFundingArbitrage(points, spotMid, perpMid, capital, spotFee, perpFee, sizeDecimals, exitBasisRate = (perpMid - spotMid) / spotMid) {
   if (!Number.isFinite(capital) || capital < 100 || !Number.isFinite(spotFee) || !Number.isFinite(perpFee) ||
     spotFee < 0 || perpFee < 0 || spotFee > 0.1 || perpFee > 0.1 || !points.length ||
-    !(spotMid > 0 && perpMid > 0)) {
-    throw new Error("Enter capital of at least 100 USDC and fees between 0% and 10%");
+    !(spotMid > 0 && perpMid > 0) || !Number.isFinite(exitBasisRate) || exitBasisRate <= -1 || exitBasisRate > 10) {
+    throw new Error("Enter capital of at least 100 USDC, fees between 0% and 10%, and an exit gap above -100% and at most 1000%");
   }
   const halfCapital = capital / 2;
   const maxQuantity = Math.min(halfCapital / (spotMid * (1 + spotFee)), halfCapital / (perpMid * (1 + perpFee)));
@@ -954,23 +956,25 @@ function modelFundingArbitrage(points, spotMid, perpMid, capital, spotFee, perpF
   const spotEntry = quantity * spotMid;
   const spotExit = spotEntry;
   const perpEntry = quantity * perpMid;
-  const perpExit = perpEntry;
+  const perpExit = quantity * spotMid * (1 + exitBasisRate);
   const entryFees = spotEntry * spotFee + perpEntry * perpFee;
   const exitFees = spotExit * spotFee + perpExit * perpFee;
-  const pricePnl = 0;
+  const rawPricePnl = (spotExit - spotEntry) + (perpEntry - perpExit);
+  const pricePnl = Math.abs(rawPricePnl) < 1e-8 ? 0 : rawPricePnl;
   const totalCost = entryFees + exitFees - pricePnl;
   const curve = points.map((point) => ({ ...point,
     fundingUsd: perpEntry * point.cumulativeRate,
     netUsd: perpEntry * point.cumulativeRate - totalCost,
   }));
-  return { quantity, spotEntry, spotExit, perpEntry, perpExit, entryFees, exitFees, pricePnl,
+  return { quantity, spotEntry, spotExit, perpEntry, perpExit, entryFees, exitFees, pricePnl, exitBasisRate,
     fundingUsd: curve.at(-1).fundingUsd, netUsd: curve.at(-1).netUsd, returnRate: curve.at(-1).netUsd / capital, curve };
 }
 
 function resetSimulator() {
   for (const id of ["simSpotQuote", "simPerpQuote", "simBasis", "simPosition", "simFunding",
-    "simEntryFees", "simExitFees", "simPricePnl", "simNet", "simReturn"]) document.getElementById(id).textContent = "--";
+    "simEntryFees", "simExitFees", "simExitBasisDisplay", "simPricePnl", "simNet", "simReturn"]) document.getElementById(id).textContent = "--";
   document.getElementById("simSnapshot").textContent = "Quotes: --";
+  document.getElementById("simBasisComparison").textContent = "Basis scenario comparison: --";
   document.getElementById("simCoverage").textContent = "Coverage: --";
   document.getElementById("simChartRange").textContent = "--";
   if (state.simChartInstance) { state.simChartInstance.destroy(); state.simChartInstance = null; }
@@ -1030,7 +1034,8 @@ function renderSimulator() {
   const snapshot = state.simSnapshot;
   if (!snapshot) return;
   const { market, points, stats, days } = snapshot;
-  if ([elements.simCapital, elements.simSpotFee, elements.simPerpFee].some((input) => input.value.trim() === "")) {
+  if ([elements.simCapital, elements.simSpotFee, elements.simPerpFee,
+    ...(elements.simExitScenario.value === "custom" ? [elements.simExitBasis] : [])].some((input) => input.value.trim() === "")) {
     resetSimulator();
     elements.simStatus.textContent = "Simulation unavailable: complete all capital and fee inputs";
     return;
@@ -1038,9 +1043,12 @@ function renderSimulator() {
   const capital = Number(elements.simCapital.value);
   const spotFee = Number(elements.simSpotFee.value) / 100;
   const perpFee = Number(elements.simPerpFee.value) / 100;
+  const currentBasisRate = (market.perpMid - market.spotMid) / market.spotMid;
+  const exitBasisRate = elements.simExitScenario.value === "converged" ? 0 :
+    elements.simExitScenario.value === "custom" ? Number(elements.simExitBasis.value) / 100 : currentBasisRate;
   let result;
   try {
-    result = modelFundingArbitrage(points, market.spotMid, market.perpMid, capital, spotFee, perpFee, market.sizeDecimals);
+    result = modelFundingArbitrage(points, market.spotMid, market.perpMid, capital, spotFee, perpFee, market.sizeDecimals, exitBasisRate);
   } catch (error) {
     resetSimulator();
     elements.simStatus.textContent = `Simulation unavailable: ${error.message}`;
@@ -1057,11 +1065,15 @@ function renderSimulator() {
   set("simFunding", formatSignedMoney(result.fundingUsd));
   set("simEntryFees", formatMoney(result.entryFees));
   set("simExitFees", formatMoney(result.exitFees));
+  set("simExitBasisDisplay", signedPercent(result.exitBasisRate));
   set("simPricePnl", formatSignedMoney(result.pricePnl));
   set("simNet", formatSignedMoney(result.netUsd));
   set("simReturn", signedPercent(result.returnRate));
+  const unchanged = modelFundingArbitrage(points, market.spotMid, market.perpMid, capital, spotFee, perpFee, market.sizeDecimals, currentBasisRate);
+  const converged = modelFundingArbitrage(points, market.spotMid, market.perpMid, capital, spotFee, perpFee, market.sizeDecimals, 0);
+  set("simBasisComparison", `If closed with current gap unchanged: ${formatSignedMoney(unchanged.netUsd)} net · If gap converges to zero: ${formatSignedMoney(converged.netUsd)} net. These are alternative exit assumptions, not observed future prices.`);
   const reservedCapital = result.spotEntry * (1 + spotFee) + result.perpEntry * (1 + perpFee);
-  set("simSnapshot", `Midpoints read ${formatUtc(snapshot.quoteFetchedAt)} UTC · Funding history read ${formatUtc(snapshot.historyFetchedAt)} UTC. Matched position reserves ${formatMoney(reservedCapital)} of ${formatMoney(capital)}; ${formatMoney(Math.max(0, capital - reservedCapital))} remains unallocated due to the 1× capital split and size increment. Entry and exit use the same current midpoints; spread, slippage, and price changes are excluded.${market.warning ? ` ${market.warning}.` : ""}`);
+  set("simSnapshot", `Midpoints read ${formatUtc(snapshot.quoteFetchedAt)} UTC · Funding history read ${formatUtc(snapshot.historyFetchedAt)} UTC. Matched position reserves ${formatMoney(reservedCapital)} of ${formatMoney(capital)}; ${formatMoney(Math.max(0, capital - reservedCapital))} remains unallocated due to the 1× capital split and size increment. Exit spot is held at its current midpoint; exit perp is set by the selected basis. Spread and slippage are excluded.${market.warning ? ` ${market.warning}.` : ""}`);
   set("simCoverage", `Coverage: ${simComplete ? "Complete" : "Partial"} · ${stats.samples}/${coverage.expectedSamples} requested hourly samples · ${coverage.missingSamples} internal gaps · available span ${formatSampleDays(coverage.spanHours / 24)}. Missing hours are not filled or projected.`);
   set("simChartRange", `${formatUtc(stats.firstSampleTime)} – ${formatUtc(stats.lastSampleTime)} UTC`);
   elements.simStatus.textContent = `${market.label} · ${simComplete ? "Complete" : "Partial"} historical replay · ${stats.samples} observed hours · midpoint-only scenario${market.warning ? ` · ${market.warning}` : ""}`;
@@ -1819,6 +1831,11 @@ elements.simWindow.addEventListener("change", runSimulator);
 for (const input of [elements.simCapital, elements.simSpotFee, elements.simPerpFee]) {
   input.addEventListener("input", renderSimulator);
 }
+elements.simExitScenario.addEventListener("change", () => {
+  elements.simExitBasis.disabled = elements.simExitScenario.value !== "custom";
+  renderSimulator();
+});
+elements.simExitBasis.addEventListener("input", renderSimulator);
 elements.symbolAnalysisSelect.addEventListener("change", analyzeSelectedSymbol);
 elements.symbolHistoryWindowSelect.addEventListener("change", analyzeSelectedSymbol);
 elements.analyzeSymbolButton.addEventListener("click", analyzeSelectedSymbol);
