@@ -923,14 +923,23 @@ function findSimulatorPairs(spotData, perpData) {
 
 function renderSimulatorPairList(pairs, selected) {
   elements.simPairRows.innerHTML = pairs.length ? pairs.map((pair) => `
-    <tr class="sim-pair-row ${pair.perp === selected ? "selected" : ""}">
+    <tr class="sim-pair-row ${pair.spotCoin === selected ? "selected" : ""}">
       <td><strong>${escapeHtml(pair.label)}</strong> <span class="stat-desc">${escapeHtml(pair.spotToken)}/USDC ↔ ${escapeHtml(pair.perp)}</span></td>
       <td class="num">${pair.spotMid > 0 ? formatNumber(pair.spotMid, pair.spotMid < 1 ? 6 : 2) : "--"}</td>
       <td class="num">${pair.perpMid > 0 ? formatNumber(pair.perpMid, pair.perpMid < 1 ? 6 : 2) : "--"}</td>
       <td class="num">${pair.spotMid > 0 && pair.perpMid > 0 ? signedPercent((pair.perpMid - pair.spotMid) / pair.spotMid) : "--"}</td>
       <td class="num">${formatUsd(pair.volume)}</td>
-      <td>${pair.eligible ? `<button class="text-button secondary" type="button" data-sim-pair="${escapeHtml(pair.perp)}" aria-pressed="${pair.perp === selected}">${pair.perp === selected ? "Selected" : "Simulate"}</button>` : `<span class="stat-desc">${escapeHtml(pair.reason)}</span>`}</td>
+      <td><button class="text-button secondary" type="button" data-sim-pair="${escapeHtml(pair.spotCoin)}" aria-pressed="${pair.spotCoin === selected}">${pair.spotCoin === selected ? "Selected" : pair.eligible ? "Simulate" : "View"}</button>${pair.reason ? `<span class="stat-desc"> ${escapeHtml(pair.reason)}</span>` : ""}</td>
     </tr>`).join("") : `<tr><td colspan="6" class="empty-cell">No pairs currently pass the market checks</td></tr>`;
+}
+
+function renderSimulatorPairOptions(pairs) {
+  const options = (rows) => rows.map((pair) =>
+    `<option value="${escapeHtml(pair.spotCoin)}">${escapeHtml(pair.label)} · ${escapeHtml(pair.spotToken)}/USDC + ${escapeHtml(pair.perp)}${pair.eligible ? "" : " · View only"}</option>`).join("");
+  return pairs.length ?
+    `<optgroup label="Can simulate">${options(pairs.filter((pair) => pair.eligible))}</optgroup>` +
+    `<optgroup label="Reference only">${options(pairs.filter((pair) => !pair.eligible))}</optgroup>` :
+    `<option value="">No stock pairs available</option>`;
 }
 
 function parseBook(data, name) {
@@ -1028,18 +1037,24 @@ async function runSimulator() {
     const pairs = findSimulatorPairs(spotData, perpData);
     state.simPairs = pairs;
     const eligiblePairs = pairs.filter((pair) => pair.eligible);
-    elements.simPair.innerHTML = eligiblePairs.length ? eligiblePairs.map((pair) =>
-      `<option value="${escapeHtml(pair.perp)}">${escapeHtml(pair.label)} · ${escapeHtml(pair.spotToken)}/USDC spot + ${escapeHtml(pair.perp)} perp</option>`
-    ).join("") : `<option value="">No eligible pairs</option>`;
-    if (!eligiblePairs.length) {
+    elements.simPair.innerHTML = renderSimulatorPairOptions(pairs);
+    if (!pairs.length) {
       renderSimulatorPairList(pairs, "");
-      throw new Error("No tokenized US stock pairs meet the live market checks");
+      throw new Error("No US stock pair candidates are listed in the current market metadata");
     }
-    const market = eligiblePairs.find((pair) => pair.perp === requestedPair) || eligiblePairs[0];
-    if (!market) throw new Error(`${requestedPair} is no longer eligible; choose another pair`);
-    elements.simPair.value = market.perp;
-    renderSimulatorPairList(pairs, market.perp);
+    const market = pairs.find((pair) => pair.spotCoin === requestedPair) || eligiblePairs[0] || pairs[0];
+    elements.simPair.value = market.spotCoin;
+    renderSimulatorPairList(pairs, market.spotCoin);
     elements.simPairStatus.textContent = `${eligiblePairs.length} executable xStock pairs · ${pairs.length} US-stock ticker candidates listed · ${market.spotToken}/USDC market ${market.spotCoin} · token ${market.tokenId} · 24h spot volume ${formatMoney(market.volume)}. Tokenized stock redemption, spot/perp basis and execution risk remain.`;
+    elements.simRunButton.textContent = market.eligible ? "Refresh & Simulate" : "Refresh Pair";
+    if (!market.eligible) {
+      elements.simStatus.textContent = `${market.spotToken}/USDC + ${market.perp} is reference only: ${market.reason}. Select a pair under “Can simulate” for modeled P&L.`;
+      if (market.spotMid > 0 && market.perpMid > 0) {
+        document.getElementById("simBasis").textContent = signedPercent((market.perpMid - market.spotMid) / market.spotMid);
+        document.getElementById("simSnapshot").textContent = `Current midpoints: spot ${formatNumber(market.spotMid, 4)} · perp ${formatNumber(market.perpMid, 4)}. Midpoints are not executable fills.`;
+      }
+      return;
+    }
     const [spotRaw, perpRaw, history] = await Promise.all([
       fetchInfo({ type: "l2Book", coin: market.spotCoin }),
       fetchInfo({ type: "l2Book", coin: market.perp }),

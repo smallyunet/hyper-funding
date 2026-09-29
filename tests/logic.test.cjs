@@ -120,6 +120,12 @@ test('simulator separates verified xStocks from same-ticker reference markets', 
   assert.match(pairs.find((pair) => pair.spotToken === 'AAPLX').reason, /No live midpoint/);
   assert.equal(pairs.find((pair) => pair.spotToken === 'GOOGL').eligible, false);
   assert.match(pairs.find((pair) => pair.spotToken === 'GOOGL').reason, /underlying unverified/);
+  context.__pairs = pairs;
+  const options = run('renderSimulatorPairOptions(__pairs)');
+  assert.match(options, /<optgroup label="Can simulate">/);
+  assert.match(options, /<optgroup label="Reference only">/);
+  assert.equal((options.match(/<option /g) || []).length, pairs.length);
+  assert.match(options, /value="@266"[^>]*>GOOGL[^<]*View only/);
   context.__spot[0].tokens[1].tokenId = 'wrong-token';
   assert.deepEqual(Array.from(run('findSimulatorPairs(__spot,__perp)'), (pair) => pair.perp), ['xyz:MU', 'xyz:AAPL', 'xyz:GOOGL']);
 });
