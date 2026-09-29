@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- ChartJS for Funding History Graphs -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=20260929-two-lines" />
+    <link rel="stylesheet" href="./styles.css?v=20260929-simulator" />
   </head>
   <body>
     <!-- Background grid decoration -->
@@ -83,6 +83,10 @@
         <button class="tab-btn" id="tabSymbolAnalysis" type="button" role="tab" aria-selected="false" data-target="viewSymbolAnalysis">
           <svg class="tab-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 3v18h18M7 15l4-5 3 2 5-7"/></svg>
           Symbol Analysis
+        </button>
+        <button class="tab-btn" id="tabSimulator" type="button" role="tab" aria-selected="false" data-target="viewSimulator">
+          <svg class="tab-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 20h18M5 16l5-5 4 3 5-8M17 6h2v2"/></svg>
+          Arbitrage Simulator
         </button>
       </nav>
 
@@ -481,8 +485,53 @@
           </div>
         </section>
       </div>
+      <div class="view-content" id="viewSimulator">
+        <section class="panel-card analysis-shell" aria-label="Funding arbitrage simulator">
+          <div class="analysis-header">
+            <div>
+              <p class="eyebrow">SPOT + PERP · SCENARIO</p>
+              <h2>Funding Arbitrage Simulator</h2>
+              <p id="simStatus" role="status">Load a verified spot and perpetual pair to model a long spot / short perp position.</p>
+            </div>
+            <button class="text-button primary-btn" id="simRunButton" type="button">Refresh &amp; Simulate</button>
+          </div>
+          <div class="symbol-analysis-body">
+            <p class="analysis-note">PURR/USDC spot + PURR perpetual is the currently verified same-asset pair. Other same-name spot tokens are not assumed to hedge XYZ perpetuals. Historical funding rates are observed; all trade costs and P&amp;L below are a current-quote scenario, not a historical trade or forecast.</p>
+            <div class="sim-input-grid">
+              <label class="select-field"><span>Pair</span><select id="simPair"><option value="PURR">PURR/USDC spot + PURR perp</option></select></label>
+              <label class="select-field"><span>History window</span><select id="simWindow"><option value="7">7d</option><option value="14">14d</option><option value="30">30d</option><option value="60">60d</option><option value="90">90d</option><option value="180">180d</option><option value="365">1y</option></select></label>
+              <label class="number-field"><span>Initial capital (USDC)</span><input id="simCapital" type="number" min="100" step="100" value="10000" /></label>
+              <label class="number-field"><span>Spot taker fee (%)</span><input id="simSpotFee" type="number" min="0" max="10" step="0.001" value="0.07" /></label>
+              <label class="number-field"><span>Perp taker fee (%)</span><input id="simPerpFee" type="number" min="0" max="10" step="0.001" value="0.045" /></label>
+            </div>
+            <p class="sim-source-note">Default fees are Hyperliquid base-tier taker rates; edit them for your account. Half the capital is reserved for spot and half for 1× perp margin. No borrowing, leverage, reinvestment, future price move or liquidation is modeled.</p>
+            <div class="sim-price-grid">
+              <article class="stat-box"><span class="stat-label">Spot bid / ask</span><strong id="simSpotQuote">--</strong></article>
+              <article class="stat-box"><span class="stat-label">Perp bid / ask</span><strong id="simPerpQuote">--</strong></article>
+              <article class="stat-box"><span class="stat-label">Spot / perp midpoint basis</span><strong id="simBasis">--</strong></article>
+              <article class="stat-box"><span class="stat-label">Matched position</span><strong id="simPosition">--</strong></article>
+            </div>
+            <p class="sim-source-note" id="simSnapshot">Quotes: --</p>
+            <div class="sim-result-grid">
+              <article class="stat-box"><span class="stat-label">Historical funding replay · short perp</span><strong id="simFunding">--</strong></article>
+              <article class="stat-box"><span class="stat-label">Entry fees</span><strong id="simEntryFees">--</strong></article>
+              <article class="stat-box"><span class="stat-label">Exit fees</span><strong id="simExitFees">--</strong></article>
+              <article class="stat-box"><span class="stat-label">Entry + exit price effect</span><strong id="simPricePnl">--</strong></article>
+              <article class="stat-box sim-net"><span class="stat-label">Modeled net P&amp;L</span><strong id="simNet">--</strong></article>
+              <article class="stat-box"><span class="stat-label">Return on initial capital</span><strong id="simReturn">--</strong></article>
+            </div>
+            <p class="sim-source-note" id="simCoverage">Coverage: --</p>
+            <div class="symbol-chart-heading">
+              <div><h3>Funding and Modeled Net P&amp;L</h3><p id="simChartRange">--</p></div>
+              <div class="symbol-chart-legend"><span class="legend-rate">Funding / Hr</span><span class="legend-cumulative">Cumulative Funding</span><span class="legend-profit">Modeled Net P&amp;L</span></div>
+            </div>
+            <div class="symbol-chart-container"><canvas id="simChart" aria-label="Hourly funding, cumulative funding, and modeled net profit" role="img"></canvas></div>
+            <p class="sim-source-note">Exit is priced using the same current order-book snapshot as entry. This holds the present spot/perp basis constant and charges both entry and exit book spreads plus four taker fees. Funding uses a fixed current perp entry notional at each observed hourly rate. The purple line subtracts all modeled round-trip costs at every point; it is a hypothetical close-out value, not realized profit.</p>
+          </div>
+        </section>
+      </div>
     </main>
 
-    <script src="./app.js?v=20260929-two-lines"></script>
+    <script src="./app.js?v=20260929-simulator"></script>
   </body>
 </html>

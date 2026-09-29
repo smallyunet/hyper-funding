@@ -48,6 +48,9 @@ const state = {
   symbolAnalysisPage: 0,
   symbolAnalysisRequest: 0,
   symbolOptionsKey: "",
+  simRequest: 0,
+  simSnapshot: null,
+  simChartInstance: null,
   activeView: "viewMarketBoard",
   autoBatchAnalysisStarted: false,
   batchRequest: 0,
@@ -97,9 +100,11 @@ const elements = {
   tabMarkets: document.getElementById("tabMarkets"),
   tabAnalytics: document.getElementById("tabAnalytics"),
   tabSymbolAnalysis: document.getElementById("tabSymbolAnalysis"),
+  tabSimulator: document.getElementById("tabSimulator"),
   viewMarketBoard: document.getElementById("viewMarketBoard"),
   viewBatchAnalytics: document.getElementById("viewBatchAnalytics"),
   viewSymbolAnalysis: document.getElementById("viewSymbolAnalysis"),
+  viewSimulator: document.getElementById("viewSimulator"),
   symbolAnalysisSelect: document.getElementById("symbolAnalysisSelect"),
   symbolHistoryWindowSelect: document.getElementById("symbolHistoryWindowSelect"),
   analyzeSymbolButton: document.getElementById("analyzeSymbolButton"),
@@ -109,6 +114,12 @@ const elements = {
   symbolPrevPage: document.getElementById("symbolPrevPage"),
   symbolNextPage: document.getElementById("symbolNextPage"),
   symbolPageStatus: document.getElementById("symbolPageStatus"),
+  simStatus: document.getElementById("simStatus"),
+  simRunButton: document.getElementById("simRunButton"),
+  simWindow: document.getElementById("simWindow"),
+  simCapital: document.getElementById("simCapital"),
+  simSpotFee: document.getElementById("simSpotFee"),
+  simPerpFee: document.getElementById("simPerpFee"),
   
   // Asset Detail elements
   detailPanelContent: document.getElementById("detailPanelContent"),
@@ -700,6 +711,7 @@ function switchTab(viewId) {
     [elements.tabMarkets, elements.viewMarketBoard],
     [elements.tabAnalytics, elements.viewBatchAnalytics],
     [elements.tabSymbolAnalysis, elements.viewSymbolAnalysis],
+    [elements.tabSimulator, elements.viewSimulator],
   ]) {
     const active = view.id === viewId;
     tab.classList.toggle("active", active);
@@ -831,6 +843,223 @@ function renderSymbolChart(points) {
         x: { ticks: { color: "#94a3b8", maxTicksLimit: 8 }, grid: { display: false } },
         rate: { type: "linear", position: "left", title: { display: true, text: "Funding / Hr (%)", color: "#10b981" }, ticks: { color: "#10b981", callback: (value) => `${Number(value).toFixed(4)}%` }, grid: { color: "rgba(148,163,184,.12)" } },
         cumulative: { type: "linear", position: "right", title: { display: true, text: "Cumulative Funding (%)", color: "#f59e0b" }, ticks: { color: "#f59e0b", callback: (value) => `${Number(value).toFixed(2)}%` }, grid: { drawOnChartArea: false } },
+      },
+    },
+  });
+}
+
+async function fetchInfo(payload) {
+  const response = await fetch(API_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) throw new Error(`Hyperliquid API HTTP ${response.status}`);
+  return response.json();
+}
+
+function validateSimulatorMarkets(spotData, perpData) {
+  const [spotMeta, spotContexts] = spotData;
+  const [perpMeta, perpContexts] = perpData;
+  const pairIndex = spotMeta?.universe?.findIndex((pair) => pair.name === "PURR/USDC" && pair.isCanonical === true);
+  const perpIndex = perpMeta?.universe?.findIndex((asset) => asset.name === "PURR");
+  if (pairIndex < 0 || perpIndex < 0 || !Array.isArray(spotContexts) || !Array.isArray(perpContexts)) {
+    throw new Error("Verified PURR spot/perp market is unavailable");
+  }
+  const pair = spotMeta.universe[pairIndex];
+  if (spotMeta.tokens?.[pair.tokens?.[0]]?.name !== "PURR" || spotMeta.tokens?.[pair.tokens?.[1]]?.name !== "USDC") {
+    throw new Error("Spot token identifiers no longer match PURR/USDC");
+  }
+  const spotMid = toNumber(spotContexts[pairIndex]?.midPx);
+  const perpMid = toNumber(perpContexts[perpIndex]?.midPx);
+  if (!(spotMid > 0 && perpMid > 0)) throw new Error("Current spot or perp midpoint is unavailable");
+  return { spotCoin: pair.name, spotMid, perpMid, sizeDecimals: perpMeta.universe[perpIndex].szDecimals };
+}
+
+function parseBook(data, name) {
+  const sides = data?.levels;
+  if (!Array.isArray(sides) || sides.length !== 2) throw new Error(`${name} order book is unavailable`);
+  const parsed = sides.map((levels) => Array.isArray(levels) ? levels.map((level) => ({
+    px: toNumber(level.px), sz: toNumber(level.sz),
+  })).filter((level) => level.px > 0 && level.sz > 0) : []);
+  if (!parsed[0].length || !parsed[1].length || parsed[0][0].px >= parsed[1][0].px) {
+    throw new Error(`${name} has no valid bid/ask spread`);
+  }
+  return { bids: parsed[0], asks: parsed[1] };
+}
+
+function sweepBook(levels, quantity) {
+  if (!(quantity > 0)) return null;
+  let remaining = quantity;
+  let notional = 0;
+  for (const level of levels) {
+    const filled = Math.min(remaining, level.sz);
+    notional += filled * level.px;
+    remaining -= filled;
+    if (remaining <= quantity * 1e-10) return notional;
+  }
+  return null;
+}
+
+function modelFundingArbitrage(points, spotBook, perpBook, capital, spotFee, perpFee, sizeDecimals) {
+  if (!Number.isFinite(capital) || capital < 100 || !Number.isFinite(spotFee) || !Number.isFinite(perpFee) ||
+    spotFee < 0 || perpFee < 0 || spotFee > 0.1 || perpFee > 0.1 || !points.length) {
+    throw new Error("Enter capital of at least 100 USDC and fees between 0% and 10%");
+  }
+  const maxBookSize = Math.min(
+    ...[spotBook.asks, spotBook.bids, perpBook.bids, perpBook.asks].map((side) => side.reduce((total, level) => total + level.sz, 0))
+  );
+  const halfCapital = capital / 2;
+  let low = 0;
+  let high = Math.min(maxBookSize, halfCapital / (spotBook.asks[0].px * (1 + spotFee)), halfCapital / perpBook.bids[0].px);
+  for (let i = 0; i < 45; i += 1) {
+    const mid = (low + high) / 2;
+    const spotEntry = sweepBook(spotBook.asks, mid);
+    const perpEntry = sweepBook(perpBook.bids, mid);
+    if (spotEntry != null && perpEntry != null && spotEntry * (1 + spotFee) <= halfCapital &&
+      perpEntry * (1 + perpFee) <= halfCapital) low = mid;
+    else high = mid;
+  }
+  const step = 10 ** -sizeDecimals;
+  const quantity = Math.floor((low + step * 1e-8) / step) * step;
+  if (!(quantity > 0)) throw new Error("Insufficient order-book depth for a matched position");
+  const spotEntry = sweepBook(spotBook.asks, quantity);
+  const spotExit = sweepBook(spotBook.bids, quantity);
+  const perpEntry = sweepBook(perpBook.bids, quantity);
+  const perpExit = sweepBook(perpBook.asks, quantity);
+  if ([spotEntry, spotExit, perpEntry, perpExit].some((value) => value == null)) {
+    throw new Error("Current depth cannot fill both sides of the modeled round trip");
+  }
+  const entryFees = spotEntry * spotFee + perpEntry * perpFee;
+  const exitFees = spotExit * spotFee + perpExit * perpFee;
+  const pricePnl = spotExit - spotEntry + perpEntry - perpExit;
+  const totalCost = entryFees + exitFees - pricePnl;
+  const curve = points.map((point) => ({ ...point,
+    fundingUsd: perpEntry * point.cumulativeRate,
+    netUsd: perpEntry * point.cumulativeRate - totalCost,
+  }));
+  return { quantity, spotEntry, spotExit, perpEntry, perpExit, entryFees, exitFees, pricePnl,
+    fundingUsd: curve.at(-1).fundingUsd, netUsd: curve.at(-1).netUsd, returnRate: curve.at(-1).netUsd / capital, curve };
+}
+
+function resetSimulator() {
+  for (const id of ["simSpotQuote", "simPerpQuote", "simBasis", "simPosition", "simFunding",
+    "simEntryFees", "simExitFees", "simPricePnl", "simNet", "simReturn"]) document.getElementById(id).textContent = "--";
+  document.getElementById("simSnapshot").textContent = "Quotes: --";
+  document.getElementById("simCoverage").textContent = "Coverage: --";
+  document.getElementById("simChartRange").textContent = "--";
+  if (state.simChartInstance) { state.simChartInstance.destroy(); state.simChartInstance = null; }
+}
+
+async function runSimulator() {
+  const requestId = ++state.simRequest;
+  state.simSnapshot = null;
+  resetSimulator();
+  elements.simRunButton.disabled = true;
+  elements.simStatus.textContent = "Loading current books and historical funding samples...";
+  const days = Number(elements.simWindow.value);
+  try {
+    if (![7, 14, 30, 60, 90, 180, 365].includes(days)) throw new Error("Select a supported history window");
+    const [spotData, perpData] = await Promise.all([
+      fetchInfo({ type: "spotMetaAndAssetCtxs" }),
+      fetchInfo({ type: "metaAndAssetCtxs" }),
+    ]);
+    if (requestId !== state.simRequest) return;
+    const market = validateSimulatorMarkets(spotData, perpData);
+    const [spotRaw, perpRaw, history] = await Promise.all([
+      fetchInfo({ type: "l2Book", coin: market.spotCoin }),
+      fetchInfo({ type: "l2Book", coin: "PURR" }),
+      fetchFundingHistory("PURR", days),
+    ]);
+    if (requestId !== state.simRequest) return;
+    const spotBook = parseBook(spotRaw, "Spot");
+    const perpBook = parseBook(perpRaw, "Perp");
+    const points = buildSymbolAnalysisPoints(history);
+    const stats = summarizeFundingHistory("PURR", history);
+    if (!stats || !points.length) throw new Error("No valid PURR funding history is available");
+    state.simSnapshot = { market, spotBook, perpBook, points, stats, days, historyFetchedAt: history.fetchedAt, quoteFetchedAt: Date.now() };
+    renderSimulator();
+  } catch (error) {
+    if (requestId !== state.simRequest) return;
+    console.error("Simulation unavailable", error);
+    elements.simStatus.textContent = `Simulation unavailable: ${error.message}`;
+  } finally {
+    if (requestId === state.simRequest) elements.simRunButton.disabled = false;
+  }
+}
+
+function renderSimulator() {
+  const snapshot = state.simSnapshot;
+  if (!snapshot) return;
+  const { market, spotBook, perpBook, points, stats, days } = snapshot;
+  if ([elements.simCapital, elements.simSpotFee, elements.simPerpFee].some((input) => input.value.trim() === "")) {
+    resetSimulator();
+    elements.simStatus.textContent = "Simulation unavailable: complete all capital and fee inputs";
+    return;
+  }
+  const capital = Number(elements.simCapital.value);
+  const spotFee = Number(elements.simSpotFee.value) / 100;
+  const perpFee = Number(elements.simPerpFee.value) / 100;
+  let result;
+  try {
+    result = modelFundingArbitrage(points, spotBook, perpBook, capital, spotFee, perpFee, market.sizeDecimals);
+  } catch (error) {
+    resetSimulator();
+    elements.simStatus.textContent = `Simulation unavailable: ${error.message}`;
+    return;
+  }
+  const coverage = getHistoryCoverage(stats, days);
+  const simComplete = coverage.samples >= coverage.expectedSamples && coverage.missingSamples === 0 &&
+    Date.now() - stats.lastSampleTime <= 2 * FUNDING_HISTORY_STEP_MS;
+  const set = (id, value) => { document.getElementById(id).textContent = value; };
+  set("simSpotQuote", `${formatNumber(spotBook.bids[0].px, 5)} / ${formatNumber(spotBook.asks[0].px, 5)}`);
+  set("simPerpQuote", `${formatNumber(perpBook.bids[0].px, 5)} / ${formatNumber(perpBook.asks[0].px, 5)}`);
+  set("simBasis", signedPercent((market.perpMid - market.spotMid) / market.spotMid));
+  set("simPosition", `${formatNumber(result.quantity, market.sizeDecimals)} PURR · ${formatMoney(result.perpEntry)} short`);
+  set("simFunding", formatSignedMoney(result.fundingUsd));
+  set("simEntryFees", formatMoney(result.entryFees));
+  set("simExitFees", formatMoney(result.exitFees));
+  set("simPricePnl", formatSignedMoney(result.pricePnl));
+  set("simNet", formatSignedMoney(result.netUsd));
+  set("simReturn", signedPercent(result.returnRate));
+  const reservedCapital = result.spotEntry * (1 + spotFee) + result.perpEntry * (1 + perpFee);
+  set("simSnapshot", `Quotes read ${formatUtc(snapshot.quoteFetchedAt)} UTC · Funding history read ${formatUtc(snapshot.historyFetchedAt)} UTC. Matched position reserves ${formatMoney(reservedCapital)} of ${formatMoney(capital)}; ${formatMoney(Math.max(0, capital - reservedCapital))} remains unallocated because the available book depth or 1× capital split limits the fill. All four fills use current order-book depth.`);
+  set("simCoverage", `Coverage: ${simComplete ? "Complete" : "Partial"} · ${stats.samples}/${coverage.expectedSamples} requested hourly samples · ${coverage.missingSamples} internal gaps · available span ${formatSampleDays(coverage.spanHours / 24)}. Missing hours are not filled or projected.`);
+  set("simChartRange", `${formatUtc(stats.firstSampleTime)} – ${formatUtc(stats.lastSampleTime)} UTC`);
+  elements.simStatus.textContent = `${simComplete ? "Complete" : "Partial"} historical replay · ${stats.samples} observed hours · current-book entry and hypothetical exit`;
+  renderSimulatorChart(result.curve);
+}
+
+function formatMoney(value) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+}
+
+function formatSignedMoney(value) { return `${value >= 0 ? "+" : ""}${formatMoney(value)}`; }
+
+function renderSimulatorChart(curve) {
+  if (typeof Chart === "undefined") throw new Error("Chart.js is not loaded");
+  if (state.simChartInstance) state.simChartInstance.destroy();
+  state.simChartInstance = new Chart(document.getElementById("simChart"), {
+    type: "line",
+    data: {
+      labels: curve.map((point) => formatUtc(point.time)),
+      datasets: [
+        { label: "Funding / Hr", data: curve.map((point) => point.rate * 100), yAxisID: "rate", borderColor: "#10b981", borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 3, tension: 0 },
+        { label: "Cumulative Funding", data: curve.map((point) => point.cumulativeRate * 100), yAxisID: "cumulative", borderColor: "#f59e0b", borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 3, tension: 0 },
+        { label: "Modeled Net P&L", data: curve.map((point) => point.netUsd), yAxisID: "profit", borderColor: "#a78bfa", borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 3, tension: 0 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (context) => context.dataset.yAxisID === "profit"
+        ? `${context.dataset.label}: ${formatSignedMoney(context.parsed.y)}`
+        : `${context.dataset.label}: ${signedPercent(context.parsed.y / 100)}` } } },
+      scales: {
+        x: { ticks: { color: "#94a3b8", maxTicksLimit: 7 }, grid: { display: false } },
+        rate: { position: "left", title: { display: true, text: "Funding / Hr (%)", color: "#10b981" }, ticks: { color: "#10b981", callback: (value) => `${Number(value).toFixed(4)}%` }, grid: { color: "rgba(148,163,184,.12)" } },
+        cumulative: { position: "right", title: { display: true, text: "Cumulative (%)", color: "#f59e0b" }, ticks: { color: "#f59e0b", callback: (value) => `${Number(value).toFixed(2)}%` }, grid: { drawOnChartArea: false } },
+        profit: { position: "right", title: { display: true, text: "Net P&L (USD)", color: "#a78bfa" }, ticks: { color: "#a78bfa", callback: (value) => formatMoney(Number(value)) }, grid: { drawOnChartArea: false } },
       },
     },
   });
@@ -1536,6 +1765,15 @@ elements.tabSymbolAnalysis.addEventListener("click", () => {
   if (symbol) openSymbolAnalysis(symbol);
   else switchTab("viewSymbolAnalysis");
 });
+elements.tabSimulator.addEventListener("click", () => {
+  switchTab("viewSimulator");
+  if (!state.simSnapshot) runSimulator();
+});
+elements.simRunButton.addEventListener("click", runSimulator);
+elements.simWindow.addEventListener("change", runSimulator);
+for (const input of [elements.simCapital, elements.simSpotFee, elements.simPerpFee]) {
+  input.addEventListener("input", renderSimulator);
+}
 elements.symbolAnalysisSelect.addEventListener("change", analyzeSelectedSymbol);
 elements.symbolHistoryWindowSelect.addEventListener("change", analyzeSelectedSymbol);
 elements.analyzeSymbolButton.addEventListener("click", analyzeSelectedSymbol);

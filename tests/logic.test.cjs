@@ -88,3 +88,40 @@ test('older batch result cannot overwrite a cancelled run', async () => {
   assert.equal(run('state.analysisRows.length'), 0);
   assert.equal(node('analysisStatus').textContent, 'changed');
 });
+
+test('simulator only accepts the canonical PURR/USDC spot paired with PURR perp', () => {
+  const pair = { name: 'PURR/USDC', isCanonical: true, tokens: [1, 0] };
+  context.__spot = [{ universe: [pair], tokens: [{name:'USDC'}, {name:'PURR'}] }, [{midPx:'1'}]];
+  context.__perp = [{ universe: [{name:'PURR',szDecimals:0}] }, [{midPx:'1.01'}]];
+  assert.equal(run('validateSimulatorMarkets(__spot,__perp).spotCoin'), 'PURR/USDC');
+  pair.isCanonical = false;
+  assert.throws(() => run('validateSimulatorMarkets(__spot,__perp)'), /unavailable/);
+  pair.isCanonical = true;
+  context.__spot[0].tokens[1].name = 'OTHER';
+  assert.throws(() => run('validateSimulatorMarkets(__spot,__perp)'), /identifiers/);
+});
+
+test('simulator includes four book fills, four taker fees and signed short funding', () => {
+  context.__points = [{time:1,rate:0.01,cumulativeRate:0.01},{time:2,rate:-0.005,cumulativeRate:0.005}];
+  context.__spotBook = {bids:[{px:99,sz:100}],asks:[{px:100,sz:100}]};
+  context.__perpBook = {bids:[{px:101,sz:100}],asks:[{px:102,sz:100}]};
+  const result = run('modelFundingArbitrage(__points,__spotBook,__perpBook,1000,0.001,0.002,0)');
+  assert.equal(result.quantity, 4);
+  assert.equal(result.spotEntry, 400);
+  assert.equal(result.spotExit, 396);
+  assert.equal(result.perpEntry, 404);
+  assert.equal(result.perpExit, 408);
+  assert.ok(Math.abs(result.entryFees - 1.208) < 1e-9);
+  assert.ok(Math.abs(result.exitFees - 1.212) < 1e-9);
+  assert.equal(result.pricePnl, -8);
+  assert.ok(Math.abs(result.fundingUsd - 2.02) < 1e-9);
+  assert.ok(Math.abs(result.netUsd - (2.02 - 8 - 1.208 - 1.212)) < 1e-9);
+  assert.ok(result.curve[0].netUsd > result.curve[1].netUsd);
+});
+
+test('simulator refuses an unfillable round trip', () => {
+  context.__points = [{time:1,rate:0,cumulativeRate:0}];
+  context.__spotBook = {bids:[{px:1,sz:0.1}],asks:[{px:2,sz:0.1}]};
+  context.__perpBook = {bids:[{px:2,sz:0.1}],asks:[{px:3,sz:0.1}]};
+  assert.throws(() => run('modelFundingArbitrage(__points,__spotBook,__perpBook,1000,0,0,0)'), /depth/);
+});

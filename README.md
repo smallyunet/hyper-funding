@@ -26,6 +26,7 @@ The page calls Hyperliquid's public `info` endpoint from the browser:
 - Browser-side history analysis with `fundingHistory`.
 - Score selected or top-ranked markets by average funding, volatility, direction consistency, and estimated APR.
 - Open Symbol Analysis from either market table for one market's historical summary, hourly funding and cumulative funding chart, and paginated hourly samples.
+- Model a long-spot/short-perp PURR position in the Arbitrage Simulator tab with current order-book depth, historical hourly funding, editable capital and taker fees, and an estimated net P&L curve.
 - Show requested versus available hourly coverage; only complete windows qualify for score ranking.
 - Limit funding-history requests with a conservative rolling API weight budget; cache current windows for 5 minutes, empty responses for 1 minute, and completed 480-hour chunks for 24 hours.
 
@@ -33,7 +34,11 @@ Symbol Analysis uses the same historical summary formula as Batch Analytics: ave
 
 Positive funding is paid by longs to shorts. The signed APR does not include position direction, basis, fees, borrow cost, or trading P&L. History responses are browser-local snapshots with their collection time shown in the UI.
 
+The simulator currently accepts only the canonical PURR/USDC spot pair and the default-dex PURR perpetual, with token IDs and market metadata checked on each run. Same-name XYZ perps and spot tokens are not presumed to represent the same underlying. It reserves half of initial capital for spot purchases and half for 1× perp margin, sizes equal token quantities from available order-book depth, and leaves any unused capital idle. Entry buys spot at asks and shorts perps at bids; hypothetical exit sells spot at bids and buys back perps at asks from the same current quote reads. Four taker fees are applied to filled notionals. Default fees are 0.07% spot and 0.045% perp, editable because account tiers differ. Short funding is modeled as the fixed current perp entry notional times each observed hourly funding rate. Net P&L is cumulative modeled funding plus the current-book round-trip price effect less entry and exit fees. It is not a historical execution, current account quote, future return, or realized P&L; incomplete history remains labeled partial.
+
+Sources: [Hyperliquid spot metadata](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint/spot), [order book and history API](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint), [fees](https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees), and [funding](https://hyperliquid.gitbook.io/hyperliquid-docs/trading/funding).
+
 ## Next Scope
 
-- Add `l2Book` depth and slippage checks.
-- Join broker-side quote, shortable, borrow-fee, and margin data for real net-yield evaluation.
+- Extend the verified same-asset pair registry when liquid canonical spot and matching perp markets become available.
+- Join account-specific fee and margin data for account-level estimates.
