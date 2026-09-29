@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- ChartJS for Funding History Graphs -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=20260930-all-stock-options" />
+    <link rel="stylesheet" href="./styles.css?v=20260930-midpoint-scenarios" />
   </head>
   <body>
     <!-- Background grid decoration -->
@@ -491,12 +491,12 @@
             <div>
               <p class="eyebrow">SPOT + PERP · SCENARIO</p>
               <h2>Funding Arbitrage Simulator</h2>
-              <p id="simStatus" role="status">Load a verified spot and perpetual pair to model a long spot / short perp position.</p>
+              <p id="simStatus" role="status">Load spot and perpetual midpoint prices to model a long spot / short perp scenario.</p>
             </div>
             <button class="text-button primary-btn" id="simRunButton" type="button">Refresh &amp; Simulate</button>
           </div>
           <div class="symbol-analysis-body">
-            <p class="analysis-note">The selector includes every listed US-stock spot / XYZ perp candidate. Verified xStock pairs with usable quotes can be simulated. Other pairs remain selectable for quote inspection, with the reason a modeled trade is unavailable. Historical funding rates are observed; trade costs and P&amp;L are a current-quote scenario, not a historical trade or forecast.</p>
+            <p class="analysis-note">Any listed US-stock spot / XYZ perp candidate with both current midpoint prices can be simulated, regardless of volume or order-book depth. Ticker-only matches may represent different assets or units. Historical funding rates are observed; all trading amounts use current midpoints as hypothetical prices, not executable fills or a historical trade.</p>
             <div class="sim-input-grid">
               <label class="select-field"><span>Stock pair</span><select id="simPair"><option value="">Loading pairs...</option></select></label>
               <label class="select-field"><span>History window</span><select id="simWindow"><option value="7">7d</option><option value="14">14d</option><option value="30">30d</option><option value="60">60d</option><option value="90">90d</option><option value="180">180d</option><option value="365">1y</option></select></label>
@@ -505,17 +505,17 @@
               <label class="number-field"><span>Perp taker fee (%)</span><input id="simPerpFee" type="number" min="0" max="10" step="0.001" value="0.045" /></label>
             </div>
             <p class="sim-source-note" id="simPairStatus">Tokenized US stock pairs load from current Hyperliquid spot and XYZ perpetual markets.</p>
-            <div class="symbol-table-heading"><div><h3>US Stock Pair Candidates</h3><p>Choose any row to inspect its quotes. Verified, available pairs also run the simulation.</p></div></div>
+            <div class="symbol-table-heading"><div><h3>US Stock Pair Candidates</h3><p>Choose any row with both midpoint prices to run a price-only scenario.</p></div></div>
             <div class="table-scroll sim-pair-scroll">
               <table class="analysis-table">
                 <thead><tr><th>Pair</th><th class="num">Spot mid</th><th class="num">Perp mid</th><th class="num">Perp − spot</th><th class="num">Spot 24h vol</th><th>Action</th></tr></thead>
                 <tbody id="simPairRows"><tr><td colspan="6" class="empty-cell">Load markets to see eligible pairs</td></tr></tbody>
               </table>
             </div>
-            <p class="sim-source-note">Fees are editable estimates; verify your account's spot and XYZ perp fees, including any deployer surcharge. Half the capital is reserved for spot and half for 1× perp margin. No borrowing, leverage, reinvestment, future price move or liquidation is modeled.</p>
+            <p class="sim-source-note">Fees are editable estimates; verify your account's spot and XYZ perp fees, including any deployer surcharge. Half the capital is reserved for spot and half for 1× perp margin. The model ignores liquidity, bid/ask spread, slippage, borrowing, leverage, reinvestment, future price moves and liquidation.</p>
             <div class="sim-price-grid">
-              <article class="stat-box"><span class="stat-label">Spot bid / ask</span><strong id="simSpotQuote">--</strong></article>
-              <article class="stat-box"><span class="stat-label">Perp bid / ask</span><strong id="simPerpQuote">--</strong></article>
+              <article class="stat-box"><span class="stat-label">Spot midpoint</span><strong id="simSpotQuote">--</strong></article>
+              <article class="stat-box"><span class="stat-label">Perp midpoint</span><strong id="simPerpQuote">--</strong></article>
               <article class="stat-box"><span class="stat-label">Spot / perp midpoint basis</span><strong id="simBasis">--</strong></article>
               <article class="stat-box"><span class="stat-label">Matched position</span><strong id="simPosition">--</strong></article>
             </div>
@@ -524,7 +524,7 @@
               <article class="stat-box"><span class="stat-label">Historical funding replay · short perp</span><strong id="simFunding">--</strong></article>
               <article class="stat-box"><span class="stat-label">Entry fees</span><strong id="simEntryFees">--</strong></article>
               <article class="stat-box"><span class="stat-label">Exit fees</span><strong id="simExitFees">--</strong></article>
-              <article class="stat-box"><span class="stat-label">Entry + exit price effect</span><strong id="simPricePnl">--</strong></article>
+              <article class="stat-box"><span class="stat-label">Price effect · unchanged midpoints</span><strong id="simPricePnl">--</strong></article>
               <article class="stat-box sim-net"><span class="stat-label">Modeled net P&amp;L</span><strong id="simNet">--</strong></article>
               <article class="stat-box"><span class="stat-label">Return on initial capital</span><strong id="simReturn">--</strong></article>
             </div>
@@ -534,12 +534,12 @@
               <div class="symbol-chart-legend"><span class="legend-rate">Funding / Hr</span><span class="legend-cumulative">Cumulative Funding</span><span class="legend-profit">Modeled Net P&amp;L</span></div>
             </div>
             <div class="symbol-chart-container"><canvas id="simChart" aria-label="Hourly funding, cumulative funding, and modeled net profit" role="img"></canvas></div>
-            <p class="sim-source-note">Exit is priced using the same current order-book snapshot as entry. This holds the present spot/perp basis constant and charges both entry and exit book spreads plus four taker fees. Funding uses a fixed current perp entry notional at each observed hourly rate. The purple line subtracts all modeled round-trip costs at every point; it is a hypothetical close-out value, not realized profit.</p>
+            <p class="sim-source-note">Entry and hypothetical exit use the same current midpoint prices, so price P&amp;L is zero and the current spot/perp gap stays constant. Both legs pay fees on entry and exit. Funding uses a fixed current perp notional at each observed hourly rate. The purple line subtracts modeled fees; it excludes bid/ask spread, slippage and any change in basis, and is not realized profit.</p>
           </div>
         </section>
       </div>
     </main>
 
-    <script src="./app.js?v=20260930-all-stock-options"></script>
+    <script src="./app.js?v=20260930-midpoint-scenarios"></script>
   </body>
 </html>

@@ -108,49 +108,47 @@ test('simulator separates verified xStocks from same-ticker reference markets', 
     {coin:'@713',midPx:null,dayNtlVlm:'0'},
     {coin:'@702',midPx:'230',dayNtlVlm:'20000'},
     {coin:'@1',midPx:'230',dayNtlVlm:'1000000'},
-    {coin:'@266',midPx:'339',dayNtlVlm:'20000'},
+    {coin:'@266',midPx:'339',dayNtlVlm:'0'},
   ]];
   context.__perp = [{ universe: [
     {name:'xyz:NVDA',szDecimals:2}, {name:'xyz:MU',szDecimals:2}, {name:'xyz:AAPL',szDecimals:2},
     {name:'NVDA',szDecimals:2}, {name:'xyz:GOOGL',szDecimals:2},
   ] }, [{midPx:'231'}, {midPx:'1066'}, {midPx:'330'}, {midPx:'230'}, {midPx:'339'}]];
   const pairs = run('findSimulatorPairs(__spot,__perp)');
-  assert.deepEqual(Array.from(pairs, (pair) => pair.perp), ['xyz:NVDA', 'xyz:MU', 'xyz:AAPL', 'xyz:GOOGL']);
+  assert.deepEqual(Array.from(pairs, (pair) => pair.perp), ['xyz:NVDA', 'xyz:MU', 'xyz:GOOGL', 'xyz:AAPL']);
   assert.equal(pairs.find((pair) => pair.perp === 'xyz:NVDA').spotCoin, '@702');
-  assert.match(pairs.find((pair) => pair.spotToken === 'AAPLX').reason, /No live midpoint/);
-  assert.equal(pairs.find((pair) => pair.spotToken === 'GOOGL').eligible, false);
-  assert.match(pairs.find((pair) => pair.spotToken === 'GOOGL').reason, /underlying unverified/);
+  assert.match(pairs.find((pair) => pair.spotToken === 'AAPLX').reason, /No current midpoint/);
+  assert.equal(pairs.find((pair) => pair.spotToken === 'GOOGL').eligible, true);
+  assert.match(pairs.find((pair) => pair.spotToken === 'GOOGL').warning, /underlying unverified/);
+  assert.match(pairs.find((pair) => pair.spotToken === 'GOOGL').warning, /No spot trades/);
   context.__pairs = pairs;
   const options = run('renderSimulatorPairOptions(__pairs)');
-  assert.match(options, /<optgroup label="Can simulate">/);
-  assert.match(options, /<optgroup label="Reference only">/);
+  assert.match(options, /<optgroup label="Midpoint scenario available">/);
+  assert.match(options, /<optgroup label="No two-sided midpoint">/);
   assert.equal((options.match(/<option /g) || []).length, pairs.length);
-  assert.match(options, /value="@266"[^>]*>GOOGL[^<]*View only/);
+  assert.match(options, /value="@266"[^>]*>GOOGL/);
   context.__spot[0].tokens[1].tokenId = 'wrong-token';
-  assert.deepEqual(Array.from(run('findSimulatorPairs(__spot,__perp)'), (pair) => pair.perp), ['xyz:MU', 'xyz:AAPL', 'xyz:GOOGL']);
+  assert.deepEqual(Array.from(run('findSimulatorPairs(__spot,__perp)'), (pair) => pair.perp), ['xyz:MU', 'xyz:GOOGL', 'xyz:AAPL']);
 });
 
-test('simulator includes four book fills, four taker fees and signed short funding', () => {
+test('midpoint simulator charges four fees and replays signed short funding', () => {
   context.__points = [{time:1,rate:0.01,cumulativeRate:0.01},{time:2,rate:-0.005,cumulativeRate:0.005}];
-  context.__spotBook = {bids:[{px:99,sz:100}],asks:[{px:100,sz:100}]};
-  context.__perpBook = {bids:[{px:101,sz:100}],asks:[{px:102,sz:100}]};
-  const result = run('modelFundingArbitrage(__points,__spotBook,__perpBook,1000,0.001,0.002,0)');
+  const result = run('modelFundingArbitrage(__points,100,101,1000,0.001,0.002,0)');
   assert.equal(result.quantity, 4);
   assert.equal(result.spotEntry, 400);
-  assert.equal(result.spotExit, 396);
+  assert.equal(result.spotExit, 400);
   assert.equal(result.perpEntry, 404);
-  assert.equal(result.perpExit, 408);
+  assert.equal(result.perpExit, 404);
   assert.ok(Math.abs(result.entryFees - 1.208) < 1e-9);
-  assert.ok(Math.abs(result.exitFees - 1.212) < 1e-9);
-  assert.equal(result.pricePnl, -8);
+  assert.ok(Math.abs(result.exitFees - 1.208) < 1e-9);
+  assert.equal(result.pricePnl, 0);
   assert.ok(Math.abs(result.fundingUsd - 2.02) < 1e-9);
-  assert.ok(Math.abs(result.netUsd - (2.02 - 8 - 1.208 - 1.212)) < 1e-9);
+  assert.ok(Math.abs(result.netUsd - (2.02 - 1.208 * 2)) < 1e-9);
   assert.ok(result.curve[0].netUsd > result.curve[1].netUsd);
 });
 
-test('simulator refuses an unfillable round trip', () => {
+test('midpoint simulator requires both prices and a tradable size increment', () => {
   context.__points = [{time:1,rate:0,cumulativeRate:0}];
-  context.__spotBook = {bids:[{px:1,sz:0.1}],asks:[{px:2,sz:0.1}]};
-  context.__perpBook = {bids:[{px:2,sz:0.1}],asks:[{px:3,sz:0.1}]};
-  assert.throws(() => run('modelFundingArbitrage(__points,__spotBook,__perpBook,1000,0,0,0)'), /depth/);
+  assert.throws(() => run('modelFundingArbitrage(__points,0,100,1000,0,0,0)'), /capital/);
+  assert.throws(() => run('modelFundingArbitrage(__points,10000,10000,1000,0,0,0)'), /size increment/);
 });

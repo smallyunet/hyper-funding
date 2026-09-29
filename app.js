@@ -36,8 +36,6 @@ const SIMULATOR_TICKER_MATCHES = [
   { spotToken: "ORCL", tokenId: "0x92de6e7ea04b168f6acc93d18f3becce", perp: "xyz:ORCL", label: "ORCL", fullName: null },
   { spotToken: "TSLA", tokenId: "0xc8a24412041cdc4a167e7d3568fb6ebd", perp: "xyz:TSLA", label: "TSLA", fullName: "Tesla - Wagyu.xyz" },
 ];
-const SIMULATOR_MAX_MID_GAP = 0.05;
-const SIMULATOR_MIN_SPOT_DAILY_VOLUME = 10_000;
 
 let historyRequestQueue = Promise.resolve();
 let lastHistoryRequestAt = 0;
@@ -911,13 +909,13 @@ function findSimulatorPairs(spotData, perpData) {
     const volume = toNumber(spot?.dayNtlVlm);
     if (!token || !pair || !perp || perp.asset.isDelisted) return [];
     const hasQuotes = spotMid > 0 && perpMid > 0;
-    const reason = [SIMULATOR_TICKER_MATCHES.includes(definition) ? "Ticker only; underlying unverified" : "",
-      !hasQuotes ? "No live midpoint" : "",
-      volume < SIMULATOR_MIN_SPOT_DAILY_VOLUME ? "Low spot volume" : "",
-      hasQuotes && Math.abs(spotMid - perpMid) / perpMid > SIMULATOR_MAX_MID_GAP ? "Price gap > 5%" : ""]
+    const reason = hasQuotes ? "" : "No current midpoint on both legs";
+    const warning = [SIMULATOR_TICKER_MATCHES.includes(definition) ? "Ticker match; underlying unverified" : "",
+      volume === 0 ? "No spot trades in 24h" : "",
+      hasQuotes && Math.abs(spotMid - perpMid) / perpMid > 0.05 ? "Midpoint gap > 5%" : ""]
       .filter(Boolean).join(" · ");
     return [{ ...definition, spotCoin: pair.name, spotIndex: pair.index, spotMid, perpMid, volume,
-      reason, eligible: !reason, sizeDecimals: Math.min(token.szDecimals, perp.asset.szDecimals) }];
+      reason, warning, eligible: hasQuotes, sizeDecimals: Math.min(token.szDecimals, perp.asset.szDecimals) }];
   }).sort((a, b) => Number(b.eligible) - Number(a.eligible));
 }
 
@@ -929,76 +927,37 @@ function renderSimulatorPairList(pairs, selected) {
       <td class="num">${pair.perpMid > 0 ? formatNumber(pair.perpMid, pair.perpMid < 1 ? 6 : 2) : "--"}</td>
       <td class="num">${pair.spotMid > 0 && pair.perpMid > 0 ? signedPercent((pair.perpMid - pair.spotMid) / pair.spotMid) : "--"}</td>
       <td class="num">${formatUsd(pair.volume)}</td>
-      <td><button class="text-button secondary" type="button" data-sim-pair="${escapeHtml(pair.spotCoin)}" aria-pressed="${pair.spotCoin === selected}">${pair.spotCoin === selected ? "Selected" : pair.eligible ? "Simulate" : "View"}</button>${pair.reason ? `<span class="stat-desc"> ${escapeHtml(pair.reason)}</span>` : ""}</td>
+      <td><button class="text-button secondary" type="button" data-sim-pair="${escapeHtml(pair.spotCoin)}" aria-pressed="${pair.spotCoin === selected}">${pair.spotCoin === selected ? "Selected" : pair.eligible ? "Simulate" : "View"}</button>${pair.reason || pair.warning ? `<span class="stat-desc"> ${escapeHtml(pair.reason || pair.warning)}</span>` : ""}</td>
     </tr>`).join("") : `<tr><td colspan="6" class="empty-cell">No pairs currently pass the market checks</td></tr>`;
 }
 
 function renderSimulatorPairOptions(pairs) {
   const options = (rows) => rows.map((pair) =>
-    `<option value="${escapeHtml(pair.spotCoin)}">${escapeHtml(pair.label)} · ${escapeHtml(pair.spotToken)}/USDC + ${escapeHtml(pair.perp)}${pair.eligible ? "" : " · View only"}</option>`).join("");
+    `<option value="${escapeHtml(pair.spotCoin)}">${escapeHtml(pair.label)} · ${escapeHtml(pair.spotToken)}/USDC + ${escapeHtml(pair.perp)}${pair.eligible ? "" : " · No midpoint"}</option>`).join("");
   return pairs.length ?
-    `<optgroup label="Can simulate">${options(pairs.filter((pair) => pair.eligible))}</optgroup>` +
-    `<optgroup label="Reference only">${options(pairs.filter((pair) => !pair.eligible))}</optgroup>` :
+    `<optgroup label="Midpoint scenario available">${options(pairs.filter((pair) => pair.eligible))}</optgroup>` +
+    `<optgroup label="No two-sided midpoint">${options(pairs.filter((pair) => !pair.eligible))}</optgroup>` :
     `<option value="">No stock pairs available</option>`;
 }
 
-function parseBook(data, name) {
-  const sides = data?.levels;
-  if (!Array.isArray(sides) || sides.length !== 2) throw new Error(`${name} order book is unavailable`);
-  const parsed = sides.map((levels) => Array.isArray(levels) ? levels.map((level) => ({
-    px: toNumber(level.px), sz: toNumber(level.sz),
-  })).filter((level) => level.px > 0 && level.sz > 0) : []);
-  if (!parsed[0].length || !parsed[1].length || parsed[0][0].px >= parsed[1][0].px) {
-    throw new Error(`${name} has no valid bid/ask spread`);
-  }
-  return { bids: parsed[0], asks: parsed[1] };
-}
-
-function sweepBook(levels, quantity) {
-  if (!(quantity > 0)) return null;
-  let remaining = quantity;
-  let notional = 0;
-  for (const level of levels) {
-    const filled = Math.min(remaining, level.sz);
-    notional += filled * level.px;
-    remaining -= filled;
-    if (remaining <= quantity * 1e-10) return notional;
-  }
-  return null;
-}
-
-function modelFundingArbitrage(points, spotBook, perpBook, capital, spotFee, perpFee, sizeDecimals) {
+function modelFundingArbitrage(points, spotMid, perpMid, capital, spotFee, perpFee, sizeDecimals) {
   if (!Number.isFinite(capital) || capital < 100 || !Number.isFinite(spotFee) || !Number.isFinite(perpFee) ||
-    spotFee < 0 || perpFee < 0 || spotFee > 0.1 || perpFee > 0.1 || !points.length) {
+    spotFee < 0 || perpFee < 0 || spotFee > 0.1 || perpFee > 0.1 || !points.length ||
+    !(spotMid > 0 && perpMid > 0)) {
     throw new Error("Enter capital of at least 100 USDC and fees between 0% and 10%");
   }
-  const maxBookSize = Math.min(
-    ...[spotBook.asks, spotBook.bids, perpBook.bids, perpBook.asks].map((side) => side.reduce((total, level) => total + level.sz, 0))
-  );
   const halfCapital = capital / 2;
-  let low = 0;
-  let high = Math.min(maxBookSize, halfCapital / (spotBook.asks[0].px * (1 + spotFee)), halfCapital / perpBook.bids[0].px);
-  for (let i = 0; i < 45; i += 1) {
-    const mid = (low + high) / 2;
-    const spotEntry = sweepBook(spotBook.asks, mid);
-    const perpEntry = sweepBook(perpBook.bids, mid);
-    if (spotEntry != null && perpEntry != null && spotEntry * (1 + spotFee) <= halfCapital &&
-      perpEntry * (1 + perpFee) <= halfCapital) low = mid;
-    else high = mid;
-  }
-  const step = 10 ** -sizeDecimals;
-  const quantity = Math.floor((low + step * 1e-8) / step) * step;
-  if (!(quantity > 0)) throw new Error("Insufficient order-book depth for a matched position");
-  const spotEntry = sweepBook(spotBook.asks, quantity);
-  const spotExit = sweepBook(spotBook.bids, quantity);
-  const perpEntry = sweepBook(perpBook.bids, quantity);
-  const perpExit = sweepBook(perpBook.asks, quantity);
-  if ([spotEntry, spotExit, perpEntry, perpExit].some((value) => value == null)) {
-    throw new Error("Current depth cannot fill both sides of the modeled round trip");
-  }
+  const maxQuantity = Math.min(halfCapital / (spotMid * (1 + spotFee)), halfCapital / (perpMid * (1 + perpFee)));
+  const scale = 10 ** sizeDecimals;
+  const quantity = Math.floor(maxQuantity * scale + 1e-8) / scale;
+  if (!(quantity > 0)) throw new Error("Capital is too small for the pair's minimum size increment");
+  const spotEntry = quantity * spotMid;
+  const spotExit = spotEntry;
+  const perpEntry = quantity * perpMid;
+  const perpExit = perpEntry;
   const entryFees = spotEntry * spotFee + perpEntry * perpFee;
   const exitFees = spotExit * spotFee + perpExit * perpFee;
-  const pricePnl = spotExit - spotEntry + perpEntry - perpExit;
+  const pricePnl = 0;
   const totalCost = entryFees + exitFees - pricePnl;
   const curve = points.map((point) => ({ ...point,
     fundingUsd: perpEntry * point.cumulativeRate,
@@ -1023,8 +982,8 @@ async function runSimulator() {
   state.simSnapshot = null;
   resetSimulator();
   elements.simRunButton.disabled = true;
-  elements.simStatus.textContent = "Loading current books and historical funding samples...";
-  elements.simPairStatus.textContent = "Checking current eligible spot/perp pairs...";
+  elements.simStatus.textContent = "Loading current midpoints and historical funding samples...";
+  elements.simPairStatus.textContent = "Checking current spot/perp midpoint pairs...";
   elements.simPairRows.innerHTML = `<tr><td colspan="6" class="empty-cell">Checking current pairs...</td></tr>`;
   const days = Number(elements.simWindow.value);
   try {
@@ -1045,28 +1004,18 @@ async function runSimulator() {
     const market = pairs.find((pair) => pair.spotCoin === requestedPair) || eligiblePairs[0] || pairs[0];
     elements.simPair.value = market.spotCoin;
     renderSimulatorPairList(pairs, market.spotCoin);
-    elements.simPairStatus.textContent = `${eligiblePairs.length} executable xStock pairs · ${pairs.length} US-stock ticker candidates listed · ${market.spotToken}/USDC market ${market.spotCoin} · token ${market.tokenId} · 24h spot volume ${formatMoney(market.volume)}. Tokenized stock redemption, spot/perp basis and execution risk remain.`;
+    elements.simPairStatus.textContent = `${eligiblePairs.length} midpoint scenarios · ${pairs.length} US-stock ticker candidates listed · ${market.spotToken}/USDC market ${market.spotCoin} · token ${market.tokenId} · 24h spot volume ${formatMoney(market.volume)}.${market.warning ? ` ${market.warning}.` : ""} Midpoint prices do not show executable costs.`;
     elements.simRunButton.textContent = market.eligible ? "Refresh & Simulate" : "Refresh Pair";
     if (!market.eligible) {
-      elements.simStatus.textContent = `${market.spotToken}/USDC + ${market.perp} is reference only: ${market.reason}. Select a pair under “Can simulate” for modeled P&L.`;
-      if (market.spotMid > 0 && market.perpMid > 0) {
-        document.getElementById("simBasis").textContent = signedPercent((market.perpMid - market.spotMid) / market.spotMid);
-        document.getElementById("simSnapshot").textContent = `Current midpoints: spot ${formatNumber(market.spotMid, 4)} · perp ${formatNumber(market.perpMid, 4)}. Midpoints are not executable fills.`;
-      }
+      elements.simStatus.textContent = `${market.spotToken}/USDC + ${market.perp}: ${market.reason}. Select a pair under “Midpoint scenario available” to simulate.`;
       return;
     }
-    const [spotRaw, perpRaw, history] = await Promise.all([
-      fetchInfo({ type: "l2Book", coin: market.spotCoin }),
-      fetchInfo({ type: "l2Book", coin: market.perp }),
-      fetchFundingHistory(market.perp, days),
-    ]);
+    const history = await fetchFundingHistory(market.perp, days);
     if (requestId !== state.simRequest) return;
-    const spotBook = parseBook(spotRaw, `${market.spotToken} spot`);
-    const perpBook = parseBook(perpRaw, `${market.perp} perp`);
     const points = buildSymbolAnalysisPoints(history);
     const stats = summarizeFundingHistory(market.perp, history);
     if (!stats || !points.length) throw new Error(`No valid ${market.perp} funding history is available`);
-    state.simSnapshot = { market, spotBook, perpBook, points, stats, days, historyFetchedAt: history.fetchedAt, quoteFetchedAt: Date.now() };
+    state.simSnapshot = { market, points, stats, days, historyFetchedAt: history.fetchedAt, quoteFetchedAt: Date.now() };
     renderSimulator();
   } catch (error) {
     if (requestId !== state.simRequest) return;
@@ -1080,7 +1029,7 @@ async function runSimulator() {
 function renderSimulator() {
   const snapshot = state.simSnapshot;
   if (!snapshot) return;
-  const { market, spotBook, perpBook, points, stats, days } = snapshot;
+  const { market, points, stats, days } = snapshot;
   if ([elements.simCapital, elements.simSpotFee, elements.simPerpFee].some((input) => input.value.trim() === "")) {
     resetSimulator();
     elements.simStatus.textContent = "Simulation unavailable: complete all capital and fee inputs";
@@ -1091,7 +1040,7 @@ function renderSimulator() {
   const perpFee = Number(elements.simPerpFee.value) / 100;
   let result;
   try {
-    result = modelFundingArbitrage(points, spotBook, perpBook, capital, spotFee, perpFee, market.sizeDecimals);
+    result = modelFundingArbitrage(points, market.spotMid, market.perpMid, capital, spotFee, perpFee, market.sizeDecimals);
   } catch (error) {
     resetSimulator();
     elements.simStatus.textContent = `Simulation unavailable: ${error.message}`;
@@ -1101,8 +1050,8 @@ function renderSimulator() {
   const simComplete = coverage.samples >= coverage.expectedSamples && coverage.missingSamples === 0 &&
     Date.now() - stats.lastSampleTime <= 2 * FUNDING_HISTORY_STEP_MS;
   const set = (id, value) => { document.getElementById(id).textContent = value; };
-  set("simSpotQuote", `${formatNumber(spotBook.bids[0].px, 5)} / ${formatNumber(spotBook.asks[0].px, 5)}`);
-  set("simPerpQuote", `${formatNumber(perpBook.bids[0].px, 5)} / ${formatNumber(perpBook.asks[0].px, 5)}`);
+  set("simSpotQuote", formatNumber(market.spotMid, 5));
+  set("simPerpQuote", formatNumber(market.perpMid, 5));
   set("simBasis", signedPercent((market.perpMid - market.spotMid) / market.spotMid));
   set("simPosition", `${formatNumber(result.quantity, market.sizeDecimals)} ${market.label} · ${formatMoney(result.perpEntry)} short`);
   set("simFunding", formatSignedMoney(result.fundingUsd));
@@ -1112,10 +1061,10 @@ function renderSimulator() {
   set("simNet", formatSignedMoney(result.netUsd));
   set("simReturn", signedPercent(result.returnRate));
   const reservedCapital = result.spotEntry * (1 + spotFee) + result.perpEntry * (1 + perpFee);
-  set("simSnapshot", `Quotes read ${formatUtc(snapshot.quoteFetchedAt)} UTC · Funding history read ${formatUtc(snapshot.historyFetchedAt)} UTC. Matched position reserves ${formatMoney(reservedCapital)} of ${formatMoney(capital)}; ${formatMoney(Math.max(0, capital - reservedCapital))} remains unallocated because the available book depth or 1× capital split limits the fill. All four fills use current order-book depth.`);
+  set("simSnapshot", `Midpoints read ${formatUtc(snapshot.quoteFetchedAt)} UTC · Funding history read ${formatUtc(snapshot.historyFetchedAt)} UTC. Matched position reserves ${formatMoney(reservedCapital)} of ${formatMoney(capital)}; ${formatMoney(Math.max(0, capital - reservedCapital))} remains unallocated due to the 1× capital split and size increment. Entry and exit use the same current midpoints; spread, slippage, and price changes are excluded.${market.warning ? ` ${market.warning}.` : ""}`);
   set("simCoverage", `Coverage: ${simComplete ? "Complete" : "Partial"} · ${stats.samples}/${coverage.expectedSamples} requested hourly samples · ${coverage.missingSamples} internal gaps · available span ${formatSampleDays(coverage.spanHours / 24)}. Missing hours are not filled or projected.`);
   set("simChartRange", `${formatUtc(stats.firstSampleTime)} – ${formatUtc(stats.lastSampleTime)} UTC`);
-  elements.simStatus.textContent = `${market.label} · ${simComplete ? "Complete" : "Partial"} historical replay · ${stats.samples} observed hours · current-book entry and hypothetical exit`;
+  elements.simStatus.textContent = `${market.label} · ${simComplete ? "Complete" : "Partial"} historical replay · ${stats.samples} observed hours · midpoint-only scenario${market.warning ? ` · ${market.warning}` : ""}`;
   renderSimulatorChart(result.curve);
 }
 
