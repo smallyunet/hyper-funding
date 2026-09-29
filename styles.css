@@ -1163,6 +1163,12 @@ select:focus {
   gap: 12px;
 }
 
+.analysis-actions .text-button {
+  flex-shrink: 0;
+  height: 38px;
+  white-space: nowrap;
+}
+
 .compact-field {
   width: auto;
   min-width: 130px;
@@ -1333,6 +1339,10 @@ select:focus {
   font-size: 12px;
 }
 
+.symbol-chart-legend {
+  flex-wrap: wrap;
+}
+
 .symbol-chart-legend span::before {
   content: "";
   display: inline-block;
@@ -1344,6 +1354,7 @@ select:focus {
 
 .legend-rate::before { background: #10b981; }
 .legend-apr::before { background: #60a5fa; }
+.legend-cumulative::before { background: #f59e0b; }
 
 .symbol-chart-container {
   height: 380px;
@@ -1387,6 +1398,19 @@ select:focus {
   
   .detail-stats-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1200px) {
+  .analysis-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 14px;
+  }
+
+  .analysis-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
   }
 }
 

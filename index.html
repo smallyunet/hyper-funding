@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- ChartJS for Funding History Graphs -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260929-cumulative" />
   </head>
   <body>
     <!-- Background grid decoration -->
@@ -452,7 +452,7 @@
           </div>
 
           <div class="symbol-analysis-body">
-            <p class="analysis-note">Historical funding samples only. APR is the arithmetic mean hourly rate × 8,760, annualized for comparison; it is not realized P&amp;L or a trade simulation. The blue line uses the running mean from the first available sample.</p>
+            <p class="analysis-note">Historical funding samples only. APR is the arithmetic mean hourly rate × 8,760, annualized for comparison. The blue line uses the running mean; the orange line sums hourly rates from the first available sample. Neither includes position direction, fees, price P&amp;L, or compounding.</p>
             <div class="symbol-summary-grid" id="symbolSummaryGrid">
               <article class="stat-box"><span class="stat-label">Avg Funding / Hr</span><strong id="symbolAvgFunding">--</strong></article>
               <article class="stat-box"><span class="stat-label">Avg APR Est.</span><strong id="symbolAvgApr">--</strong></article>
@@ -464,10 +464,10 @@
               <article class="stat-box"><span class="stat-label">Available Span</span><strong id="symbolAvailableSpan">--</strong></article>
             </div>
             <div class="symbol-chart-heading">
-              <div><h3>Funding and Running Avg APR</h3><p id="symbolChartRange">--</p></div>
-              <div class="symbol-chart-legend"><span class="legend-rate">Funding / Hr</span><span class="legend-apr">Running Avg APR</span></div>
+              <div><h3>Funding, Running Avg APR and Cumulative Rate</h3><p id="symbolChartRange">--</p></div>
+              <div class="symbol-chart-legend"><span class="legend-rate">Funding / Hr</span><span class="legend-apr">Running Avg APR</span><span class="legend-cumulative">Cumulative Funding</span></div>
             </div>
-            <div class="symbol-chart-container"><canvas id="symbolAnalysisChart" aria-label="Hourly funding and running average APR chart" role="img"></canvas></div>
+            <div class="symbol-chart-container"><canvas id="symbolAnalysisChart" aria-label="Hourly funding, running average APR, and cumulative funding chart" role="img"></canvas></div>
             <div class="symbol-table-heading">
               <div><h3>Hourly Samples</h3><p>Newest first · UTC timestamps</p></div>
               <div class="symbol-pagination"><button class="text-button secondary" id="symbolPrevPage" type="button">Previous</button><span id="symbolPageStatus">--</span><button class="text-button secondary" id="symbolNextPage" type="button">Next</button></div>
@@ -483,6 +483,6 @@
       </div>
     </main>
 
-    <script src="./app.js"></script>
+    <script src="./app.js?v=20260929-cumulative"></script>
   </body>
 </html>

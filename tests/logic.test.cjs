@@ -65,6 +65,18 @@ test('empty cache expires earlier than populated history', () => {
   assert.ok(run("readHistoryCache('full')"));
 });
 
+test('cumulative funding sums signed hourly rates while APR annualizes their running mean', () => {
+  context.__history = [
+    { time: 1, fundingRate: '0.0001' },
+    { time: 2, fundingRate: '-0.0002' },
+    { time: 3, fundingRate: '0.0003' },
+  ];
+  const points = run('buildSymbolAnalysisPoints(__history)');
+  assert.ok(Math.abs(points[1].cumulativeRate - -0.0001) < 1e-12);
+  assert.ok(Math.abs(points[2].cumulativeRate - 0.0002) < 1e-12);
+  assert.ok(Math.abs(points[2].runningApr - 0.0002 / 3 * 8760) < 1e-12);
+});
+
 test('older batch result cannot overwrite a cancelled run', async () => {
   node('historyWindowSelect').value = '7';
   node('analysisProgressWrapper').classList = { add() {}, remove() {} };

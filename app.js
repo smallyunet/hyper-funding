@@ -801,7 +801,7 @@ function buildSymbolAnalysisPoints(history) {
     .filter((item) => Number.isFinite(item.time) && Number.isFinite(item.rate))
     .map((item, index) => {
       total += item.rate;
-      return { ...item, runningRate: total / (index + 1), runningApr: total / (index + 1) * HOURS_PER_YEAR };
+      return { ...item, cumulativeRate: total, runningRate: total / (index + 1), runningApr: total / (index + 1) * HOURS_PER_YEAR };
     });
 }
 
@@ -816,6 +816,7 @@ function renderSymbolChart(points) {
       datasets: [
         { label: "Funding / Hr", data: points.map((point) => point.rate * 100), yAxisID: "rate", borderColor: "#10b981", backgroundColor: "#10b981", borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 3, tension: 0 },
         { label: "Running Avg APR", data: points.map((point) => point.runningApr * 100), yAxisID: "apr", borderColor: "#60a5fa", backgroundColor: "#60a5fa", borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 3, tension: 0 },
+        { label: "Cumulative Funding", data: points.map((point) => point.cumulativeRate * 100), yAxisID: "cumulative", borderColor: "#f59e0b", backgroundColor: "#f59e0b", borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 3, tension: 0 },
       ],
     },
     options: {
@@ -825,12 +826,13 @@ function renderSymbolChart(points) {
       interaction: { mode: "index", intersect: false },
       plugins: {
         legend: { display: false },
-        tooltip: { callbacks: { label: (context) => `${context.dataset.label}: ${context.parsed.y >= 0 ? "+" : ""}${context.parsed.y.toFixed(context.dataset.yAxisID === "rate" ? 5 : 2)}%` } },
+        tooltip: { callbacks: { label: (context) => `${context.dataset.label}: ${context.parsed.y >= 0 ? "+" : ""}${context.parsed.y.toFixed(context.dataset.yAxisID === "rate" ? 5 : context.dataset.yAxisID === "cumulative" ? 4 : 2)}%` } },
       },
       scales: {
         x: { ticks: { color: "#94a3b8", maxTicksLimit: 8 }, grid: { display: false } },
         rate: { type: "linear", position: "left", title: { display: true, text: "Funding / Hr (%)", color: "#10b981" }, ticks: { color: "#10b981", callback: (value) => `${Number(value).toFixed(4)}%` }, grid: { color: "rgba(148,163,184,.12)" } },
         apr: { type: "linear", position: "right", title: { display: true, text: "Running Avg APR (%)", color: "#60a5fa" }, ticks: { color: "#60a5fa", callback: (value) => `${Number(value).toFixed(1)}%` }, grid: { drawOnChartArea: false } },
+        cumulative: { type: "linear", position: "right", weight: 2, title: { display: true, text: "Cumulative Funding (%)", color: "#f59e0b" }, ticks: { color: "#f59e0b", callback: (value) => `${Number(value).toFixed(2)}%` }, grid: { drawOnChartArea: false } },
       },
     },
   });
