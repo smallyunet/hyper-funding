@@ -29,6 +29,9 @@ The page calls Hyperliquid's public `info` endpoint from the browser, loading bo
 - Score selected or top-ranked markets by average funding, volatility, direction consistency, and estimated APR.
 - Open Symbol Analysis from either market table for one market's historical summary, hourly funding and cumulative funding chart, and paginated hourly samples.
 - Choose a long-spot/short-perp midpoint scenario in the Arbitrage Simulator tab, with historical hourly funding, editable capital and taker fees, and an estimated net P&L curve.
+- Compare every mapped spot/perp pair in Arbitrage Leaderboard under one history window, capital input, fee schedule and exit scenario. Default sorting is modeled net APR descending; pair, return, P&L, funding, fees, entry basis and coverage headers also toggle sorting.
+- Keep incomplete histories visible below ranked complete scenarios by default; optionally include them in ranking. Missing quotes, failed calculations and cancelled pairs retain separate statuses. Progress updates as pairs finish, and cancellation retains completed results.
+- Open a leaderboard row in Arbitrage Simulator using the exact saved quotes, funding history and scenario parameters, without fetching a different snapshot.
 - Show requested versus available hourly coverage; only complete windows qualify for score ranking.
 - Limit funding-history requests with a conservative rolling API weight budget; cache current windows for 5 minutes, empty responses for 1 minute, and completed 480-hour chunks for 24 hours.
 

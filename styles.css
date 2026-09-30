@@ -1660,6 +1660,23 @@ h3 { font-size: 15px; }
 .workspace-status { display: none; gap: 20px; flex-wrap: wrap; justify-content: space-between; color: var(--text-muted); font-size: 12px; padding: 10px 0 16px; }
 body:not([data-active-view="viewMarketBoard"]) .metrics-grid { display: none; }
 body:not([data-active-view="viewMarketBoard"]) .workspace-status { display: flex; }
+.leaderboard-controls { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; margin-bottom: 16px; }
+.leaderboard-fees { display: grid; grid-template-columns: repeat(2, minmax(0, 240px)); gap: 14px; padding-top: 14px; }
+.leaderboard-progress { display: block; width: 100%; height: 6px; accent-color: var(--accent-blue); margin: 16px 0 24px; }
+.leaderboard-partial-toggle { display: flex; align-items: center; gap: 8px; color: var(--text-secondary); font-size: 12px; }
+.leaderboard-partial-toggle input { accent-color: var(--accent-blue); }
+.leaderboard-table { min-width: 1350px; }
+.leaderboard-table .leaderboard-pair { min-width: 220px; }
+.leaderboard-table .stat-desc { display: block; margin-top: 5px; font-size: 11px; }
+.leaderboard-table .sim-pair-warning, .leaderboard-table .leaderboard-reason { white-space: normal; max-width: 250px; line-height: 1.5; }
+.leaderboard-table tbody tr:not([data-leaderboard-pair]) { cursor: default; }
+.leaderboard-table td.positive { color: var(--accent-green); }
+.leaderboard-table td.negative { color: var(--accent-red); }
+@media (max-width: 1100px) { .leaderboard-controls { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 600px) {
+  .leaderboard-controls, .leaderboard-fees { grid-template-columns: 1fr; }
+  .leaderboard-table-heading { align-items: flex-start; flex-direction: column; }
+}
 .tab-navigation { background: transparent; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; padding: 0; width: 100%; margin-bottom: 20px; gap: 8px; }
 .tab-btn { border-radius: 0; border: 0; border-bottom: 2px solid transparent; padding: 13px 16px; color: var(--text-muted); background: transparent; box-shadow: none; font-size: 13px; }
 .tab-btn.active { background: transparent; color: var(--accent-blue); border-bottom-color: var(--accent-blue); box-shadow: none; }

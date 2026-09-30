@@ -93,6 +93,11 @@ const state = {
   simSnapshot: null,
   simPairs: [],
   simChartInstance: null,
+  leaderboardRequest: 0,
+  leaderboardAbortController: null,
+  leaderboardRows: [],
+  leaderboardSnapshot: null,
+  leaderboardSort: "apr-desc",
   activeView: "viewMarketBoard",
   autoBatchAnalysisStarted: false,
   batchRequest: 0,
@@ -114,7 +119,7 @@ const elements = {
   lowestSymbol: document.getElementById("lowestSymbol"),
   directionSplit: document.getElementById("directionSplit"),
   searchInput: document.getElementById("searchInput"),
-  assetTypeSelects: ["assetTypeSelect", "batchAssetType", "symbolAssetType", "simAssetType"].map((id) => document.getElementById(id)),
+  assetTypeSelects: ["assetTypeSelect", "batchAssetType", "symbolAssetType", "simAssetType", "leaderboardAssetType"].map((id) => document.getElementById(id)),
   marketSortButtons: [...document.querySelectorAll("[data-market-sort]")],
   batchSortButtons: [...document.querySelectorAll("[data-batch-sort]")],
   minVolumeInput: document.getElementById("minVolumeInput"),
@@ -149,6 +154,22 @@ const elements = {
   viewBatchAnalytics: document.getElementById("viewBatchAnalytics"),
   viewSymbolAnalysis: document.getElementById("viewSymbolAnalysis"),
   viewSimulator: document.getElementById("viewSimulator"),
+  tabLeaderboard: document.getElementById("tabLeaderboard"),
+  viewLeaderboard: document.getElementById("viewLeaderboard"),
+  leaderboardRun: document.getElementById("leaderboardRun"),
+  leaderboardCancel: document.getElementById("leaderboardCancel"),
+  leaderboardStatus: document.getElementById("leaderboardStatus"),
+  leaderboardConfig: document.getElementById("leaderboardConfig"),
+  leaderboardProgress: document.getElementById("leaderboardProgress"),
+  leaderboardRows: document.getElementById("leaderboardRows"),
+  leaderboardWindow: document.getElementById("leaderboardWindow"),
+  leaderboardCapital: document.getElementById("leaderboardCapital"),
+  leaderboardSpotFee: document.getElementById("leaderboardSpotFee"),
+  leaderboardPerpFee: document.getElementById("leaderboardPerpFee"),
+  leaderboardExitScenario: document.getElementById("leaderboardExitScenario"),
+  leaderboardExitBasis: document.getElementById("leaderboardExitBasis"),
+  leaderboardIncludePartial: document.getElementById("leaderboardIncludePartial"),
+  leaderboardSortButtons: [...document.querySelectorAll("[data-leaderboard-sort]")],
   symbolAnalysisSelect: document.getElementById("symbolAnalysisSelect"),
   symbolHistoryWindowSelect: document.getElementById("symbolHistoryWindowSelect"),
   analyzeSymbolButton: document.getElementById("analyzeSymbolButton"),
@@ -783,6 +804,7 @@ function switchTab(viewId) {
     [elements.tabAnalytics, elements.viewBatchAnalytics],
     [elements.tabSymbolAnalysis, elements.viewSymbolAnalysis],
     [elements.tabSimulator, elements.viewSimulator],
+    [elements.tabLeaderboard, elements.viewLeaderboard],
   ]) {
     const active = view.id === viewId;
     tab.classList.toggle("active", active);
@@ -926,11 +948,12 @@ function renderSymbolChart(points) {
   });
 }
 
-async function fetchInfo(payload) {
+async function fetchInfo(payload, signal) {
   const response = await fetch(API_URL, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
+    signal,
   });
   if (!response.ok) throw new Error(`Hyperliquid API HTTP ${response.status}`);
   return response.json();
@@ -1169,9 +1192,8 @@ function renderSimulator() {
     elements.simStatus.textContent = `Simulation unavailable: ${error.message}`;
     return;
   }
-  const coverage = getHistoryCoverage(stats, days);
-  const simComplete = coverage.samples >= coverage.expectedSamples && coverage.missingSamples === 0 &&
-    Date.now() - stats.lastSampleTime <= 2 * FUNDING_HISTORY_STEP_MS;
+  const coverage = getSimulatorCoverage(stats, days, snapshot.endTime ?? Date.now());
+  const simComplete = coverage.complete;
   const set = (id, value) => { document.getElementById(id).textContent = value; };
   document.getElementById("simCoverage").classList.toggle("partial", !simComplete);
   set("simSpotQuote", formatNumber(market.spotMid, 5));
@@ -1196,9 +1218,11 @@ function renderSimulator() {
     `APR = return on initial capital × 8,760 ÷ replay hours = ${signedPercent(result.returnRate)} × 8,760 ÷ ${formatNumber(annualized.hours, 2)} = ${signedPercent(annualized.apr)}. Replay duration: ${formatNumber(annualized.hours / 24, 4)} days, from one hour before the first sample through the last sample. ${simComplete ? "Complete coverage." : "Partial coverage; only available funding samples contribute to net P&L, while missing hours remain in the elapsed duration and are not estimated."} Simple annualization of modeled net P&L after entry/exit fees and the selected basis P&L; no compounding. Uses unrounded return values. This scales the whole scenario, including its one-time fees and basis change, and is not a forecast or realized APR.` :
     "APR unavailable: a valid replay duration is required.");
   renderSimulatorCalculationDetails(result, market, spotFee, perpFee, elements.simExitScenario.value);
-  const unchanged = modelFundingArbitrage(points, market.spotMid, market.perpMid, capital, spotFee, perpFee, market.sizeDecimals, currentBasisRate);
-  const converged = modelFundingArbitrage(points, market.spotMid, market.perpMid, capital, spotFee, perpFee, market.sizeDecimals, 0);
-  set("simBasisComparison", `If closed with current gap unchanged: ${formatSignedMoney(unchanged.netUsd)} net · If gap converges to zero: ${formatSignedMoney(converged.netUsd)} net. These are alternative exit assumptions, not observed future prices.`);
+  const comparisonNet = (basis) => {
+    try { return `${formatSignedMoney(modelFundingArbitrage(points, market.spotMid, market.perpMid, capital, spotFee, perpFee, market.sizeDecimals, basis).netUsd)} net`; }
+    catch { return "unavailable for this gap"; }
+  };
+  set("simBasisComparison", `If closed with current gap unchanged: ${comparisonNet(currentBasisRate)} · If gap converges to zero: ${comparisonNet(0)}. These are alternative exit assumptions, not observed future prices.`);
   const reservedCapital = result.spotEntry * (1 + spotFee) + result.perpEntry * (1 + perpFee);
   set("simSnapshot", `Midpoints read ${formatUtc(snapshot.quoteFetchedAt)} UTC · Funding history read ${formatUtc(snapshot.historyFetchedAt)} UTC. Matched position reserves ${formatMoney(reservedCapital)} of ${formatMoney(capital)}; ${formatMoney(Math.max(0, capital - reservedCapital))} remains unallocated due to the 1× capital split and size increment. Exit spot is held at its current midpoint; exit perp is set by the selected basis. Spread and slippage are excluded.${market.warning ? ` ${market.warning}.` : ""}`);
   set("simCoverage", `Coverage: ${simComplete ? "Complete" : "Partial"} · ${stats.samples}/${coverage.expectedSamples} requested hourly samples · ${coverage.missingSamples} internal gaps · available span ${formatSampleDays(coverage.spanHours / 24)}. Missing hours are not filled or projected.`);
@@ -1206,6 +1230,210 @@ function renderSimulator() {
   set("simEventSummary", `Open: ${formatSignedMoney(-result.entryFees)} entry fees · During hold: ${formatSignedMoney(result.fundingUsd)} observed funding · Hypothetical close: ${formatSignedMoney(-result.exitFees)} exit fees and ${formatSignedMoney(result.pricePnl)} basis P&L · Final: ${formatSignedMoney(result.netUsd)}.`);
   elements.simStatus.textContent = `${market.label} · ${simComplete ? "Complete" : "Partial"} historical replay · ${stats.samples} observed hours · midpoint-only scenario${market.warning ? ` · ${market.warning}` : ""}`;
   renderSimulatorChart(result);
+}
+
+function getSimulatorCoverage(stats, days, referenceTime = Date.now()) {
+  const coverage = getHistoryCoverage(stats, days, referenceTime);
+  return { ...coverage, complete: coverage.samples >= coverage.expectedSamples && coverage.missingSamples === 0 &&
+    stats.lastSampleTime <= referenceTime && referenceTime - stats.lastSampleTime <= 2 * FUNDING_HISTORY_STEP_MS };
+}
+
+const LEADERBOARD_SORT_LABELS = { symbol: "Pair", apr: "Modeled net APR", returnRate: "Net return", netUsd: "Net P&L", fundingUsd: "Funding", fees: "Total fees", basis: "Entry basis", coverage: "Coverage" };
+
+function readLeaderboardParams() {
+  const inputs = [elements.leaderboardCapital, elements.leaderboardSpotFee, elements.leaderboardPerpFee,
+    ...(elements.leaderboardExitScenario.value === "custom" ? [elements.leaderboardExitBasis] : [])];
+  if (inputs.some((input) => !input.value.trim())) throw new Error("Complete all capital and fee inputs");
+  const params = {
+    days: Number(elements.leaderboardWindow.value), capital: Number(elements.leaderboardCapital.value),
+    spotFee: Number(elements.leaderboardSpotFee.value) / 100, perpFee: Number(elements.leaderboardPerpFee.value) / 100,
+    scenario: elements.leaderboardExitScenario.value, exitBasis: Number(elements.leaderboardExitBasis.value) / 100,
+  };
+  if (![7, 14, 30, 60, 90, 180, 365].includes(params.days)) throw new Error("Select a supported history window");
+  if (!["unchanged", "converged", "custom"].includes(params.scenario)) throw new Error("Select an exit basis scenario");
+  // Use the same validation as the simulator before fetching any history.
+  modelFundingArbitrage([{ time: 0, cumulativeRate: 0 }], 1, 1, params.capital, params.spotFee, params.perpFee, 6,
+    params.scenario === "custom" ? params.exitBasis : 0);
+  return params;
+}
+
+function calculateLeaderboardRow(market, history, params) {
+  const points = buildSymbolAnalysisPoints(history);
+  const stats = summarizeFundingHistory(market.perp, history);
+  if (!stats || !points.length) throw new Error("No valid funding history available");
+  const basis = (market.perpMid - market.spotMid) / market.spotMid;
+  const exitBasis = params.scenario === "converged" ? 0 : params.scenario === "custom" ? params.exitBasis : basis;
+  const result = modelFundingArbitrage(points, market.spotMid, market.perpMid, params.capital, params.spotFee, params.perpFee, market.sizeDecimals, exitBasis);
+  const coverage = getSimulatorCoverage(stats, params.days, params.endTime);
+  const annualized = annualizeScenarioReturn(result.returnRate, stats.firstSampleTime, stats.lastSampleTime);
+  return { market, status: coverage.complete ? "Complete" : "Partial", complete: coverage.complete,
+    ...result, apr: annualized.apr, fees: result.entryFees + result.exitFees, basis,
+    coverage: Math.min(1, stats.samples / coverage.expectedSamples), coverageDetails: coverage,
+    snapshot: { market, points, stats, days: params.days, endTime: params.endTime,
+      quoteFetchedAt: params.quoteFetchedAt, historyFetchedAt: history.fetchedAt } };
+}
+
+function sortLeaderboardRows(rows, sort = state.leaderboardSort, includePartial = elements.leaderboardIncludePartial.checked) {
+  const [field, direction] = sort.split("-");
+  const group = (row) => row.snapshot ? row.complete || includePartial ? 0 : 1 : 2;
+  return [...rows].sort((a, b) => {
+    const groupDiff = group(a) - group(b);
+    if (groupDiff) return groupDiff;
+    const label = (row) => `${row.market.label} ${row.market.spotToken} ${row.market.perp}`;
+    const compared = field === "symbol" ? label(a).localeCompare(label(b)) :
+      Number.isFinite(a[field]) && Number.isFinite(b[field]) ? a[field] - b[field] :
+        Number.isFinite(a[field]) ? -1 : Number.isFinite(b[field]) ? 1 : 0;
+    // Missing values stay below numeric values in either sort direction.
+    const missing = field !== "symbol" && (!Number.isFinite(a[field]) || !Number.isFinite(b[field]));
+    return (missing ? compared : compared * (direction === "asc" ? 1 : -1)) || label(a).localeCompare(label(b));
+  });
+}
+
+function renderLeaderboard() {
+  const [field, direction] = state.leaderboardSort.split("-");
+  elements.leaderboardSortButtons.forEach((button) => {
+    const active = button.dataset.leaderboardSort === field;
+    button.closest("th").setAttribute("aria-sort", active ? direction === "asc" ? "ascending" : "descending" : "none");
+    button.querySelector(".sort-indicator").textContent = active ? direction === "asc" ? "↑" : "↓" : "↕";
+    button.classList.toggle("sort-active", active);
+    const nextAscending = active ? direction === "desc" : button.dataset.leaderboardSort === "symbol";
+    button.setAttribute("aria-label", `Sort by ${LEADERBOARD_SORT_LABELS[button.dataset.leaderboardSort]}, ${nextAscending ? "ascending" : "descending"}`);
+  });
+  let rank = 0;
+  const percent = (value) => Number.isFinite(value) ? signedPercent(value) : "--";
+  const money = (value) => Number.isFinite(value) ? formatSignedMoney(value) : "--";
+  const color = (value) => Number.isFinite(value) ? value >= 0 ? "positive" : "negative" : "";
+  elements.leaderboardRows.innerHTML = sortLeaderboardRows(state.leaderboardRows).map((row) => {
+    const { market } = row;
+    const ranked = row.snapshot && (row.complete || elements.leaderboardIncludePartial.checked);
+    const coverage = row.coverageDetails;
+    return `<tr ${row.snapshot ? `data-leaderboard-pair="${escapeHtml(market.spotCoin)}"` : ""}>
+      <td class="num">${ranked ? ++rank : "--"}</td>
+      <td class="leaderboard-pair"><strong>${escapeHtml(market.label)}</strong> <span class="symbol-chip">${escapeHtml(categoryLabel(market.category))}</span>
+        <span class="stat-desc">${escapeHtml(market.spotToken)}/USDC + ${escapeHtml(market.perp)}</span>
+        ${market.warning ? `<span class="stat-desc sim-pair-warning">${escapeHtml(market.warning)}</span>` : ""}</td>
+      <td class="num ${color(row.apr)}">${percent(row.apr)}</td>
+      <td class="num ${color(row.returnRate)}">${percent(row.returnRate)}</td>
+      <td class="num ${color(row.netUsd)}">${money(row.netUsd)}</td>
+      <td class="num ${color(row.fundingUsd)}">${money(row.fundingUsd)}</td>
+      <td class="num">${Number.isFinite(row.fees) ? formatMoney(row.fees) : "--"}</td>
+      <td class="num">${percent(row.basis)}</td>
+      <td class="num">${coverage ? `${coverage.samples}/${coverage.expectedSamples}<span class="stat-desc">${coverage.missingSamples} internal gaps</span>` : "--"}</td>
+      <td><span class="coverage-badge ${row.complete ? "complete" : "partial"}">${escapeHtml(row.status)}</span>
+        ${row.reason ? `<span class="stat-desc leaderboard-reason">${escapeHtml(row.reason)}</span>` : ""}
+        ${row.status === "Partial" && !ranked ? '<span class="stat-desc">Excluded from ranking</span>' : ""}</td>
+      <td>${row.snapshot ? `<button class="row-analysis-button" type="button" data-leaderboard-pair="${escapeHtml(market.spotCoin)}">View details</button>` : "--"}</td>
+    </tr>`;
+  }).join("") || '<tr><td colspan="11" class="empty-cell">Choose a history window and calculate all mapped spot / perp pairs.</td></tr>';
+}
+
+function cancelLeaderboard(message = "Calculation cancelled; completed results retained.", clear = true) {
+  ++state.leaderboardRequest;
+  state.leaderboardAbortController?.abort();
+  state.leaderboardAbortController = null;
+  if (clear) {
+    state.leaderboardRows = [];
+    state.leaderboardSnapshot = null;
+    elements.leaderboardConfig.textContent = "All pairs use the same capital, fees, exit scenario and funding period.";
+    elements.leaderboardProgress.value = 0;
+  } else {
+    state.leaderboardRows.forEach((row) => { if (row.status === "Pending") row.status = "Cancelled"; });
+  }
+  elements.leaderboardRun.disabled = false;
+  elements.leaderboardCancel.disabled = true;
+  elements.leaderboardStatus.textContent = message;
+  renderLeaderboard();
+}
+
+async function runLeaderboard() {
+  let params;
+  try { params = readLeaderboardParams(); }
+  catch (error) { elements.leaderboardStatus.textContent = error.message; return; }
+  cancelLeaderboard("Loading current spot and perpetual midpoints...");
+  const requestId = state.leaderboardRequest;
+  const controller = new AbortController();
+  state.leaderboardAbortController = controller;
+  elements.leaderboardRun.disabled = true;
+  elements.leaderboardCancel.disabled = false;
+  state.leaderboardSort = "apr-desc";
+  try {
+    const [spotData, perpData, nativeData] = await Promise.all([
+      fetchInfo({ type: "spotMetaAndAssetCtxs" }, controller.signal),
+      fetchInfo({ type: "metaAndAssetCtxs", dex: "xyz" }, controller.signal),
+      fetchInfo({ type: "metaAndAssetCtxs" }, controller.signal),
+    ]);
+    if (requestId !== state.leaderboardRequest) return;
+    const pairs = findSimulatorPairs(spotData, perpData, nativeData).filter(matchesAssetType);
+    const quoteFetchedAt = Date.now();
+    params = { ...params, quoteFetchedAt, endTime: Math.floor(quoteFetchedAt / FUNDING_HISTORY_STEP_MS) * FUNDING_HISTORY_STEP_MS, pairs };
+    state.leaderboardSnapshot = params;
+    state.leaderboardRows = pairs.map((market) => ({ market, status: market.eligible ? "Pending" : "Unavailable", reason: market.reason }));
+    const scenarioLabel = { unchanged: "Current gap unchanged", converged: "Gap converges to zero", custom: `Custom gap ${signedPercent(params.exitBasis)}` }[params.scenario];
+    elements.leaderboardConfig.textContent = `${getWindowLabel(params.days)} · ${formatUtc(params.endTime - params.days * 24 * FUNDING_HISTORY_STEP_MS)} – ${formatUtc(params.endTime)} UTC · Capital ${formatMoney(params.capital)} per pair · Spot fee ${formatNumber(params.spotFee * 100, 3)}% · Perp fee ${formatNumber(params.perpFee * 100, 3)}% · ${scenarioLabel} · Midpoints read ${formatUtc(quoteFetchedAt)} UTC`;
+    const eligible = state.leaderboardRows.filter((row) => row.market.eligible);
+    elements.leaderboardProgress.max = Math.max(1, eligible.length);
+    renderLeaderboard();
+    // One history request per perp, even when several spot tokens map to it.
+    const histories = new Map();
+    let completed = 0;
+    for (const row of eligible) {
+      if (requestId !== state.leaderboardRequest) return;
+      elements.leaderboardStatus.textContent = `Calculating ${completed} / ${eligible.length} · ${row.market.label} · historical requests may wait for the API budget`;
+      try {
+        if (!histories.has(row.market.perp)) {
+          // Cache failures too so another spot leg does not repeat failed API retries.
+          try { histories.set(row.market.perp, { history: await fetchFundingHistory(row.market.perp, params.days, controller.signal, params.endTime) }); }
+          catch (error) { histories.set(row.market.perp, { error }); }
+        }
+        const source = histories.get(row.market.perp);
+        if (source.error) throw source.error;
+        if (requestId !== state.leaderboardRequest) return;
+        Object.assign(row, calculateLeaderboardRow(row.market, source.history, params));
+      } catch (error) {
+        if (requestId !== state.leaderboardRequest || error.name === "AbortError") return;
+        row.status = "Failed";
+        row.reason = error.message;
+      }
+      elements.leaderboardProgress.value = ++completed;
+      renderLeaderboard();
+    }
+    const count = (status) => state.leaderboardRows.filter((row) => row.status === status).length;
+    elements.leaderboardStatus.textContent = `${pairs.length} mapped pairs · ${count("Complete")} complete · ${count("Partial")} partial · ${count("Unavailable")} unavailable · ${count("Failed")} failed. Markets without mapped spot legs are excluded.`;
+  } catch (error) {
+    if (requestId !== state.leaderboardRequest || error.name === "AbortError") return;
+    elements.leaderboardStatus.textContent = `Leaderboard unavailable: ${error.message}`;
+  } finally {
+    if (requestId === state.leaderboardRequest) {
+      state.leaderboardAbortController = null;
+      elements.leaderboardRun.disabled = false;
+      elements.leaderboardCancel.disabled = true;
+    }
+  }
+}
+
+function openLeaderboardDetails(spotCoin) {
+  const row = state.leaderboardRows.find((item) => item.market.spotCoin === spotCoin && item.snapshot);
+  const params = state.leaderboardSnapshot;
+  if (!row || !params) return;
+  // Invalidate an in-flight single-pair request before installing this snapshot.
+  ++state.simRequest;
+  state.simSnapshot = row.snapshot;
+  state.simPairs = params.pairs;
+  elements.simPair.innerHTML = renderSimulatorPairOptions(params.pairs);
+  elements.simPair.value = spotCoin;
+  elements.simWindow.value = String(params.days);
+  elements.simCapital.value = String(params.capital);
+  elements.simSpotFee.value = String(params.spotFee * 100);
+  elements.simPerpFee.value = String(params.perpFee * 100);
+  elements.simExitScenario.value = params.scenario;
+  elements.simExitBasis.value = String(params.exitBasis * 100);
+  elements.simExitBasis.disabled = params.scenario !== "custom";
+  elements.simRunButton.disabled = false;
+  elements.simRunButton.textContent = "Refresh & Simulate";
+  elements.simPairStatus.textContent = "Opened from the leaderboard using its saved quotes, funding history and scenario parameters. Refresh & Simulate loads a new snapshot.";
+  renderSimulatorPairList(params.pairs, spotCoin);
+  switchTab("viewSimulator");
+  renderSimulator();
 }
 
 function formatMoney(value) {
@@ -1426,14 +1654,15 @@ function cancelBatchAnalysis(message = "Analysis cancelled") {
   renderAnalysis();
 }
 
-async function fetchFundingHistory(symbol, days, signal) {
+async function fetchFundingHistory(symbol, days, signal, windowEndTime) {
   signal?.throwIfAborted();
-  const cacheKey = getHistoryCacheKey(symbol, days);
+  // Fixed hourly windows keep every leaderboard row on the same funding period.
+  const cacheKey = getHistoryCacheKey(symbol, days) + (windowEndTime == null ? "" : `.end.${windowEndTime}`);
   const cached = readHistoryCache(cacheKey);
   if (cached) return Object.assign(cached.data, { fetchedAt: cached.savedAt });
 
-  const endTime = Date.now();
-  const startTime = endTime - days * 24 * 60 * 60 * 1000;
+  const endTime = windowEndTime ?? Date.now();
+  const startTime = endTime - days * 24 * 60 * 60 * 1000 + (windowEndTime == null ? 0 : 1);
   const chunkMs = FUNDING_HISTORY_CHUNK_HOURS * FUNDING_HISTORY_STEP_MS;
   const chunks = [];
   let hasSeenHistory = false;
@@ -1617,11 +1846,11 @@ function summarizeFundingHistory(symbol, history) {
   };
 }
 
-function getHistoryCoverage(stats, days) {
+function getHistoryCoverage(stats, days, referenceTime = Date.now()) {
   const expectedSamples = Math.ceil(days * 24);
   const spanHours = (stats.lastSampleTime - stats.firstSampleTime) / FUNDING_HISTORY_STEP_MS;
   const missingSamples = Math.max(0, Math.round(spanHours) + 1 - stats.samples);
-  const recentEnough = Date.now() - stats.lastSampleTime <= 2 * FUNDING_HISTORY_STEP_MS;
+  const recentEnough = referenceTime - stats.lastSampleTime <= 2 * FUNDING_HISTORY_STEP_MS;
   const complete = stats.samples >= expectedSamples * 0.95 && missingSamples <= expectedSamples * 0.05 && recentEnough;
   return { samples: stats.samples, expectedSamples, spanHours, missingSamples, complete };
 }
@@ -1898,6 +2127,7 @@ function escapeHtml(value) {
 // Event Listeners Binding
 function setAssetType(value) {
   if (!(value in ASSET_TYPES)) return;
+  cancelLeaderboard("Asset category changed; calculate the leaderboard again.");
   cancelBatchAnalysis("Asset category changed; run analysis again");
   state.assetType = value;
   elements.assetTypeSelects.forEach((select) => { select.value = value; });
@@ -2024,6 +2254,30 @@ elements.tabSimulator.addEventListener("click", () => {
   switchTab("viewSimulator");
   if (!state.simSnapshot) runSimulator();
 });
+elements.tabLeaderboard.addEventListener("click", () => switchTab("viewLeaderboard"));
+elements.leaderboardRun.addEventListener("click", runLeaderboard);
+elements.leaderboardCancel.addEventListener("click", () => cancelLeaderboard(undefined, false));
+elements.leaderboardIncludePartial.addEventListener("change", renderLeaderboard);
+elements.leaderboardRows.addEventListener("click", (event) => {
+  const target = event.target.closest("[data-leaderboard-pair]");
+  if (target) openLeaderboardDetails(target.dataset.leaderboardPair);
+});
+elements.leaderboardSortButtons.forEach((button) => button.addEventListener("click", () => {
+  const field = button.dataset.leaderboardSort;
+  if (!Object.hasOwn(LEADERBOARD_SORT_LABELS, field)) return;
+  const [currentField, direction] = state.leaderboardSort.split("-");
+  state.leaderboardSort = `${field}-${currentField === field ? direction === "desc" ? "asc" : "desc" : field === "symbol" ? "asc" : "desc"}`;
+  renderLeaderboard();
+}));
+for (const input of [elements.leaderboardCapital, elements.leaderboardSpotFee, elements.leaderboardPerpFee, elements.leaderboardExitBasis]) {
+  input.addEventListener("input", () => cancelLeaderboard("Scenario changed; calculate the leaderboard again."));
+}
+for (const input of [elements.leaderboardWindow, elements.leaderboardExitScenario]) {
+  input.addEventListener("change", () => {
+    elements.leaderboardExitBasis.disabled = elements.leaderboardExitScenario.value !== "custom";
+    cancelLeaderboard("Scenario changed; calculate the leaderboard again.");
+  });
+}
 elements.simRunButton.addEventListener("click", runSimulator);
 elements.simPair.addEventListener("change", runSimulator);
 elements.simPairRows.addEventListener("click", (event) => {

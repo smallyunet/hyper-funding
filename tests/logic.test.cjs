@@ -9,7 +9,7 @@ const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8')
 const nodes = new Map();
 function node(id) {
   if (!nodes.has(id)) nodes.set(id, {
-    value: '', textContent: '', innerHTML: '', disabled: false, dataset: {}, style: {},
+    id, value: '', textContent: '', innerHTML: '', disabled: false, dataset: {}, style: {},
     classList: { add() {}, remove() {}, toggle() {} },
     addEventListener() {}, setAttribute() {},
   });
@@ -312,4 +312,193 @@ test('batch result sorting retains complete-first ranking and independent highes
   assert.equal(node('bestAvgAprSymbol').textContent, 'ETH');
   assert.match(node('analysisRows').innerHTML, /coverage-badge partial/);
   run("state.analysisRows = []; state.analysisSort = 'score-desc'");
+});
+
+function leaderboardParams() {
+  return { days: 7, capital: 10000, spotFee: 0.0007, perpFee: 0.00045, scenario: 'unchanged', exitBasis: 0,
+    endTime: Math.floor(Date.now() / 3600000) * 3600000, quoteFetchedAt: Date.now() };
+}
+function leaderboardHistory(params, rate = '0.0001') {
+  return Object.assign(Array.from({ length: 168 }, (_, i) => ({ time: params.endTime - (167 - i) * 3600000, fundingRate: rate })), { fetchedAt: Date.now() });
+}
+function setLeaderboardControls() {
+  for (const [id, value] of Object.entries({ leaderboardWindow: '7', leaderboardCapital: '10000', leaderboardSpotFee: '0.07',
+    leaderboardPerpFee: '0.045', leaderboardExitScenario: 'unchanged', leaderboardExitBasis: '0' })) node(id).value = value;
+  node('leaderboardIncludePartial').checked = false;
+}
+const leaderboardMarket = { label: 'BTC', category: 'crypto', spotToken: 'UBTC', perp: 'BTC', spotCoin: '@1',
+  spotMid: 100, perpMid: 101, sizeDecimals: 3, eligible: true };
+
+test('leaderboard uses simulator sizing, fees, basis and elapsed-hour APR for all scenarios', () => {
+  context.__market = leaderboardMarket;
+  for (const scenario of ['unchanged', 'converged', 'custom']) {
+    const params = { ...leaderboardParams(), scenario, exitBasis: -0.02 };
+    context.__params = params;
+    context.__history = leaderboardHistory(params);
+    const row = run('calculateLeaderboardRow(__market, __history, __params)');
+    context.__row = row;
+    const expected = run('modelFundingArbitrage(__row.snapshot.points,100,101,10000,0.0007,0.00045,3,__row.exitBasisRate)');
+    assert.equal(row.netUsd, expected.netUsd);
+    assert.equal(row.returnRate, expected.returnRate);
+    assert.equal(row.fees, expected.entryFees + expected.exitFees);
+    assert.equal(row.apr, expected.returnRate * 8760 / 168);
+    assert.equal(row.status, 'Complete');
+  }
+});
+
+test('leaderboard requires every requested hour and checks recency against the saved window', () => {
+  const params = leaderboardParams();
+  context.__params = params;
+  context.__market = leaderboardMarket;
+  context.__history = leaderboardHistory(params);
+  const full = run('calculateLeaderboardRow(__market,__history,__params)');
+  assert.equal(full.complete, true);
+  context.__stats = full.snapshot.stats;
+  context.__reference = params.endTime;
+  assert.equal(run('getSimulatorCoverage(__stats,7,__reference).complete'), true);
+  assert.equal(run('getSimulatorCoverage(__stats,7,__reference+3*3600000).complete'), false);
+  context.__history.splice(80, 1);
+  const partial = run('calculateLeaderboardRow(__market,__history,__params)');
+  assert.equal(partial.complete, false);
+  assert.equal(partial.coverageDetails.missingSamples, 1);
+  assert.equal(partial.apr, partial.returnRate * 8760 / 168);
+  context.__history = leaderboardHistory(params).slice(-5);
+  assert.equal(run('calculateLeaderboardRow(__market,__history,__params).status'), 'Partial');
+});
+
+test('leaderboard ranking excludes partial histories by default and keeps failures last in both directions', () => {
+  context.__rows = [
+    { market: { ...leaderboardMarket, label: 'A' }, snapshot: {}, complete: true, apr: 0.2, fees: 10 },
+    { market: { ...leaderboardMarket, label: 'B' }, snapshot: {}, complete: true, apr: -0.1, fees: 20 },
+    { market: { ...leaderboardMarket, label: 'C' }, snapshot: {}, complete: false, apr: 5, fees: 1 },
+    { market: { ...leaderboardMarket, label: 'D' }, status: 'Failed' },
+  ];
+  const labels = (sort, include) => Array.from(run(`sortLeaderboardRows(__rows,'${sort}',${include})`), row => row.market.label);
+  assert.deepEqual(labels('apr-desc', false), ['A', 'B', 'C', 'D']);
+  assert.deepEqual(labels('apr-asc', false), ['B', 'A', 'C', 'D']);
+  assert.deepEqual(labels('apr-desc', true), ['C', 'A', 'B', 'D']);
+  assert.deepEqual(labels('fees-asc', true), ['C', 'A', 'B', 'D']);
+  assert.deepEqual(labels('symbol-desc', true), ['C', 'B', 'A', 'D']);
+});
+
+test('leaderboard validates capital, fees and custom basis before requesting data', () => {
+  setLeaderboardControls();
+  assert.equal(run('readLeaderboardParams().capital'), 10000);
+  node('leaderboardCapital').value = '';
+  assert.throws(() => run('readLeaderboardParams()'), /Complete/);
+  node('leaderboardCapital').value = '99';
+  assert.throws(() => run('readLeaderboardParams()'), /capital/);
+  node('leaderboardCapital').value = '10000';
+  node('leaderboardSpotFee').value = '-1';
+  assert.throws(() => run('readLeaderboardParams()'), /fees/);
+  node('leaderboardSpotFee').value = '0.07';
+  node('leaderboardExitScenario').value = 'custom';
+  node('leaderboardExitBasis').value = '-100';
+  assert.throws(() => run('readLeaderboardParams()'), /exit gap/);
+  setLeaderboardControls();
+});
+
+test('fixed-window history shares one boundary, filters samples, and reuses cached windows', async () => {
+  const original = run('fetchFundingHistoryChunk');
+  const params = leaderboardParams();
+  context.__fixedEnd = params.endTime;
+  const samples = leaderboardHistory(params);
+  context.__fixedSamples = [{ time: params.endTime - 168 * 3600000, fundingRate: '0.1' }, ...samples,
+    { time: params.endTime + 3600000, fundingRate: '0.1' }];
+  run('fetchFundingHistoryChunk = async () => __fixedSamples');
+  try {
+    const history = await run("fetchFundingHistory('fixed-test',7,undefined,__fixedEnd)");
+    assert.equal(history.length, 168);
+    assert.equal(history.at(-1).time, params.endTime);
+    run("fetchFundingHistoryChunk = async () => { throw new Error('should use cache'); }");
+    assert.equal((await run("fetchFundingHistory('fixed-test',7,undefined,__fixedEnd)")).length, 168);
+  } finally { context.__restoreChunk = original; run('fetchFundingHistoryChunk = __restoreChunk'); }
+});
+
+test('batch reuses each perp history, retains individual errors and advances progress', async () => {
+  setLeaderboardControls();
+  const originals = run('({fetchInfo,findSimulatorPairs,fetchFundingHistory})');
+  context.__pairs = [leaderboardMarket, { ...leaderboardMarket, spotCoin: '@2', spotToken: 'BTC2' },
+    { ...leaderboardMarket, spotCoin: '@3', perp: 'FAIL' },
+    { ...leaderboardMarket, spotCoin: '@4', perp: 'ETH' },
+    { ...leaderboardMarket, spotCoin: '@5', eligible: false, reason: 'No midpoint' }];
+  const requests = [];
+  context.__fetchFixture = async (symbol, days, signal, endTime) => {
+    requests.push({ symbol, days, endTime });
+    if (symbol === 'FAIL') throw new Error('API failure');
+    const history = leaderboardHistory({ endTime });
+    if (symbol === 'ETH') history.splice(50, 1);
+    return history;
+  };
+  run('state.assetType = "all"; fetchInfo = async () => []; findSimulatorPairs = () => __pairs; fetchFundingHistory = __fetchFixture');
+  try {
+    await run('runLeaderboard()');
+    assert.deepEqual(requests.map(item => item.symbol), ['BTC', 'FAIL', 'ETH']);
+    assert.equal(new Set(requests.map(item => item.endTime)).size, 1);
+    assert.deepEqual(Array.from(run('state.leaderboardRows'), row => row.status), ['Complete', 'Complete', 'Failed', 'Partial', 'Unavailable']);
+    assert.equal(node('leaderboardProgress').value, 4);
+    assert.equal(node('leaderboardRun').disabled, false);
+    assert.match(node('leaderboardRows').innerHTML, /Excluded from ranking/);
+    assert.match(node('leaderboardStatus').textContent, /2 complete · 1 partial · 1 unavailable · 1 failed/);
+  } finally { context.__originals = originals; run('({fetchInfo,findSimulatorPairs,fetchFundingHistory} = __originals)'); }
+});
+
+test('cancelled batch cannot install late results or change the next run controls', async () => {
+  setLeaderboardControls();
+  const originals = run('({fetchInfo,findSimulatorPairs,fetchFundingHistory})');
+  context.__pairs = [leaderboardMarket];
+  let finishHistory;
+  let historyStarted;
+  const started = new Promise(resolve => { historyStarted = resolve; });
+  context.__pendingHistory = async (symbol, days, signal, endTime) => {
+    historyStarted();
+    return new Promise(resolve => { finishHistory = () => resolve(leaderboardHistory({ endTime })); });
+  };
+  run('fetchInfo = async () => []; findSimulatorPairs = () => __pairs; fetchFundingHistory = __pendingHistory');
+  try {
+    const pending = run('runLeaderboard()');
+    await started;
+    const controller = run('state.leaderboardAbortController');
+    run("cancelLeaderboard('changed')");
+    assert.equal(controller.signal.aborted, true);
+    finishHistory();
+    await pending;
+    assert.equal(run('state.leaderboardRows.length'), 0);
+    assert.equal(node('leaderboardStatus').textContent, 'changed');
+    assert.equal(node('leaderboardRun').disabled, false);
+  } finally { context.__originals = originals; run('({fetchInfo,findSimulatorPairs,fetchFundingHistory} = __originals)'); }
+});
+
+test('opening leaderboard details preserves quotes, history and parameters without fetching', () => {
+  const params = leaderboardParams();
+  context.__params = { ...params, pairs: [leaderboardMarket], scenario: 'custom', exitBasis: 0.02 };
+  context.__market = leaderboardMarket;
+  context.__history = leaderboardHistory(params);
+  run('state.leaderboardSnapshot = __params; state.leaderboardRows = [calculateLeaderboardRow(__market,__history,__params)]');
+  const row = run('state.leaderboardRows[0]');
+  context.Chart = class { destroy() {} };
+  const previousRequest = run('state.simRequest');
+  run("openLeaderboardDetails('@1')");
+  assert.equal(run('state.simRequest'), previousRequest + 1);
+  assert.equal(run('state.activeView'), 'viewSimulator');
+  assert.equal(run('state.simSnapshot'), row.snapshot);
+  assert.equal(node('simExitScenario').value, 'custom');
+  assert.equal(node('simExitBasis').value, '2');
+  assert.equal(node('simCapital').value, '10000');
+  assert.equal(node('simNet').textContent, run('formatSignedMoney(state.leaderboardRows[0].netUsd)'));
+  assert.equal(node('simApr').textContent, run('signedPercent(state.leaderboardRows[0].apr)'));
+  run("state.activeView = 'viewMarketBoard'");
+});
+
+test('an unsupported alternative exit gap does not prevent opening valid custom scenario details', () => {
+  const params = leaderboardParams();
+  const market = { ...leaderboardMarket, spotMid: 1, perpMid: 20 };
+  context.__params = { ...params, pairs: [market], scenario: 'converged' };
+  context.__market = market;
+  context.__history = leaderboardHistory(params);
+  run('state.leaderboardSnapshot = __params; state.leaderboardRows = [calculateLeaderboardRow(__market,__history,__params)]');
+  run("openLeaderboardDetails('@1')");
+  assert.match(node('simBasisComparison').textContent, /current gap unchanged: unavailable/);
+  assert.equal(node('simNet').textContent, run('formatSignedMoney(state.leaderboardRows[0].netUsd)'));
+  run("state.activeView = 'viewMarketBoard'");
 });

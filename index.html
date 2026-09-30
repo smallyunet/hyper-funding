@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- ChartJS for Funding History Graphs -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=20260930-workspace-design-2" />
+    <link rel="stylesheet" href="./styles.css?v=20260930-leaderboard-1" />
   </head>
   <body data-active-view="viewMarketBoard">
     <!-- Background grid decoration -->
@@ -88,6 +88,10 @@
         <button class="tab-btn" id="tabSimulator" type="button" role="tab" aria-selected="false" data-target="viewSimulator">
           <svg class="tab-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M3 20h18M5 16l5-5 4 3 5-8M17 6h2v2"/></svg>
           Arbitrage Simulator
+        </button>
+        <button class="tab-btn" id="tabLeaderboard" type="button" role="tab" aria-selected="false" data-target="viewLeaderboard">
+          <svg class="tab-icon" viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M4 20V12h5v8M9 20V4h6v16M15 20V8h5v12"/></svg>
+          Arbitrage Leaderboard
         </button>
       </nav>
 
@@ -469,6 +473,64 @@
           </div>
         </section>
       </div>
+      <div class="view-content" id="viewLeaderboard">
+        <section class="panel-card analysis-shell" aria-label="Arbitrage leaderboard">
+          <div class="analysis-header">
+            <div>
+              <p class="eyebrow">SPOT + PERP · COMPARE SCENARIOS</p>
+              <h2>Arbitrage Leaderboard</h2>
+              <p id="leaderboardStatus" role="status">Calculate all mapped spot / perp pairs with the same scenario, then open a pair to inspect its results.</p>
+            </div>
+            <div class="table-tools">
+              <button class="text-button secondary" id="leaderboardCancel" type="button" disabled>Cancel</button>
+              <button class="text-button primary-btn" id="leaderboardRun" type="button">Calculate Leaderboard</button>
+            </div>
+          </div>
+          <div class="symbol-analysis-body leaderboard-body">
+            <div class="scenario-scope">Long spot / short perp · current midpoint entry · hypothetical exit · historical funding replay</div>
+            <div class="leaderboard-controls">
+              <label class="select-field"><span>Asset category</span><select id="leaderboardAssetType"><option value="all">All assets</option><option value="crypto">Crypto</option><option value="stocks">Stocks</option><option value="indices">Indices</option><option value="commodities">Commodities</option><option value="fx">FX</option><option value="preipo">Pre-IPO</option><option value="other">Other / unknown</option></select></label>
+              <label class="select-field"><span>History window</span><select id="leaderboardWindow"><option value="7">7d</option><option value="14">14d</option><option value="30">30d</option><option value="60">60d</option><option value="90">90d</option><option value="180">180d</option><option value="365">1y</option></select></label>
+              <label class="number-field"><span>Initial capital per pair (USDC)</span><input id="leaderboardCapital" type="number" min="100" step="100" value="10000" /></label>
+              <label class="select-field"><span>Exit basis scenario</span><select id="leaderboardExitScenario"><option value="unchanged">Current gap unchanged</option><option value="converged">Gap converges to zero</option><option value="custom">Custom exit gap</option></select></label>
+              <label class="number-field"><span>Target perp − spot (%)</span><input id="leaderboardExitBasis" type="number" min="-99.9" max="1000" step="0.01" value="0" disabled /></label>
+            </div>
+            <details class="advanced-fees"><summary>Advanced · taker fees</summary><div class="leaderboard-fees">
+              <label class="number-field"><span>Spot taker fee (%)</span><input id="leaderboardSpotFee" type="number" min="0" max="10" step="0.001" value="0.07" /></label>
+              <label class="number-field"><span>Perp taker fee (%)</span><input id="leaderboardPerpFee" type="number" min="0" max="10" step="0.001" value="0.045" /></label>
+            </div></details>
+            <p class="sim-source-note" id="leaderboardConfig">All pairs use the same capital, fees, exit scenario and funding period.</p>
+            <progress class="leaderboard-progress" id="leaderboardProgress" max="1" value="0" aria-label="Pairs calculated"></progress>
+            <div class="symbol-table-heading leaderboard-table-heading">
+              <div><h3>Modeled returns by pair</h3><p>Default: net APR, highest first. Click a column to sort or a completed row to open the simulator.</p></div>
+              <label class="leaderboard-partial-toggle"><input id="leaderboardIncludePartial" type="checkbox" /> Include partial histories in ranking</label>
+            </div>
+            <div class="table-scroll leaderboard-scroll">
+              <table class="analysis-table leaderboard-table">
+                <thead><tr>
+                  <th scope="col" class="num">Rank</th>
+                  <th scope="col" aria-sort="none"><button class="market-sort-button" type="button" data-leaderboard-sort="symbol">Pair <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                  <th scope="col" class="num" aria-sort="descending"><button class="market-sort-button sort-active" type="button" data-leaderboard-sort="apr">Modeled net APR <span class="sort-indicator" aria-hidden="true">↓</span></button></th>
+                  <th scope="col" class="num" aria-sort="none"><button class="market-sort-button" type="button" data-leaderboard-sort="returnRate">Net return <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                  <th scope="col" class="num" aria-sort="none"><button class="market-sort-button" type="button" data-leaderboard-sort="netUsd">Net P&amp;L <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                  <th scope="col" class="num" aria-sort="none"><button class="market-sort-button" type="button" data-leaderboard-sort="fundingUsd">Funding <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                  <th scope="col" class="num" aria-sort="none"><button class="market-sort-button" type="button" data-leaderboard-sort="fees">Total fees <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                  <th scope="col" class="num" aria-sort="none"><button class="market-sort-button" type="button" data-leaderboard-sort="basis">Entry basis <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                  <th scope="col" class="num" aria-sort="none"><button class="market-sort-button" type="button" data-leaderboard-sort="coverage">Coverage <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                  <th scope="col">Status</th><th scope="col">Action</th>
+                </tr></thead>
+                <tbody id="leaderboardRows"><tr><td colspan="11" class="empty-cell">Choose a history window and calculate all mapped spot / perp pairs.</td></tr></tbody>
+              </table>
+            </div>
+            <p class="sim-source-note">Complete histories are ranked by default. Partial histories remain visible with their available samples and internal gaps; enable the checkbox to rank them too. Missing hours are not filled or projected. APR uses elapsed replay hours, including internal gaps.</p>
+            <details class="workspace-disclosure"><summary>Scope &amp; calculation assumptions</summary>
+              <p class="sim-source-note">Each row is an independent scenario with the full capital input, not a portfolio allocation. Only the simulator's explicitly mapped USDC spot / perp pairs are included; markets without a mapped spot leg are excluded. Missing midpoint prices and failed calculations are shown separately. Pair warnings remain visible, including unverified ticker matches and wrapper / redemption risk.</p>
+              <p class="sim-source-note">The same sizing, four taker fees, signed funding replay and hypothetical exit basis calculations as Arbitrage Simulator are used. Half the capital is reserved for spot and half for 1× perp margin. APR simply annualizes modeled net return, including one-time fees and basis P&amp;L; it is not a forecast or realized return. Spread, slippage, borrowing and liquidation are excluded.</p>
+              <p class="sim-source-note">All rows share one quote collection and one funding window ending at the latest hourly boundary. Details reuse the saved snapshot and parameters. Refresh &amp; Simulate in the detail tab starts a new calculation. Long windows may take longer due to the shared API request budget; completed history chunks are cached.</p>
+            </details>
+          </div>
+        </section>
+      </div>
       <div class="view-content" id="viewSimulator">
         <section class="panel-card analysis-shell" aria-label="Funding arbitrage simulator">
           <div class="analysis-header">
@@ -538,6 +600,6 @@
       </div>
     </main>
 
-    <script src="./app.js?v=20260930-workspace-design-2"></script>
+    <script src="./app.js?v=20260930-leaderboard-1"></script>
   </body>
 </html>
