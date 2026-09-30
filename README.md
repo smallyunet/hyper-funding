@@ -51,6 +51,8 @@ Market refreshes load native and XYZ sources together. If either source fails or
 
 ## Interface
 
+The header logo and title return to Market Board. Tabs use shareable query URLs (`?tab=analytics`, `?tab=symbol`, `?tab=simulator`, and `?tab=leaderboard`); Market Board uses the base URL. Refresh and browser back/forward restore the selected tab. Other query parameters are preserved. These links select the workspace, without saving symbol or scenario inputs.
+
 The Market Board uses clickable sort headers, a collapsible details column, and sticky symbol/action columns. Analysis tabs share a compact market status strip and synchronized category controls. Batch results can be sorted while incomplete windows remain below complete windows; headline metrics are independent of the chosen result sort. Single-symbol analysis prioritizes four signals, its chart, and 50-row sample pages. The Simulator shows parameters beside its result summary and chart, with expandable fees, quote details, calculation methods and pair candidates. Its calculation assumptions and coverage semantics are unchanged. Narrow screens stack the workspace; tables scroll within their own containers.
 
 ## Next Scope

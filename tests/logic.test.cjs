@@ -5,7 +5,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8')
-  .replace(/\/\/ Initial Run\s+fetchMarkets\(\);\s+scheduleRefresh\(\);\s*$/, '');
+  .replace(/\/\/ Initial Run[\s\S]*$/, '');
 const nodes = new Map();
 function node(id) {
   if (!nodes.has(id)) nodes.set(id, {
@@ -19,11 +19,35 @@ const storage = new Map();
 const context = vm.createContext({
   document: { getElementById: node, querySelectorAll: () => [] },
   localStorage: { getItem: (key) => storage.get(key), setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) },
-  window: {}, console, setTimeout, clearTimeout, setInterval, clearInterval,
+  window: { addEventListener() {}, location: { href: 'https://example.com/' }, history: {
+    pushState(_state, _title, href) { context.window.location.href = href; },
+  } }, URL, console, setTimeout, clearTimeout, setInterval, clearInterval,
   Date, Number, Math, Map, Set, Promise, Intl, DOMException, AbortController,
 });
 vm.runInContext(source, context);
 const run = (code) => vm.runInContext(code, context);
+
+test('tab URLs survive reload/history, preserve other parameters, and fall back safely', () => {
+  context.window.location.href = 'https://example.com/dashboard/?keep=1#details';
+  for (const [view, tab] of [
+    ['viewBatchAnalytics', 'analytics'], ['viewSymbolAnalysis', 'symbol'],
+    ['viewSimulator', 'simulator'], ['viewLeaderboard', 'leaderboard'],
+  ]) {
+    run(`switchTab('${view}')`);
+    const url = new URL(context.window.location.href);
+    assert.equal(url.searchParams.get('tab'), tab);
+    assert.equal(url.searchParams.get('keep'), '1');
+    assert.equal(url.hash, '#details');
+    run("state.activeView = 'viewMarketBoard'; restoreTabFromUrl()");
+    assert.equal(run('state.activeView'), view);
+  }
+  run("switchTab('viewMarketBoard')");
+  assert.equal(new URL(context.window.location.href).searchParams.has('tab'), false);
+  context.window.location.href = 'https://example.com/?tab=unknown';
+  run('restoreTabFromUrl()');
+  assert.equal(run('state.activeView'), 'viewMarketBoard');
+  context.window.location.href = 'https://example.com/';
+});
 
 test('missing numeric fields stay missing, and basis never falls back to premium', () => {
   const rows = run(`normalizeRows([{name:'xyz:A'}, {name:'xyz:B'}], [

@@ -800,8 +800,29 @@ function updateChart(labels, data, avgFundingRate) {
   });
 }
 
-// Swaps the tab view
-function switchTab(viewId) {
+const TAB_ROUTES = {
+  viewMarketBoard: "markets",
+  viewBatchAnalytics: "analytics",
+  viewSymbolAnalysis: "symbol",
+  viewSimulator: "simulator",
+  viewLeaderboard: "leaderboard",
+};
+
+function restoreTabFromUrl() {
+  const tab = new URL(window.location.href).searchParams.get("tab");
+  const viewId = Object.keys(TAB_ROUTES).find((id) => TAB_ROUTES[id] === tab) || "viewMarketBoard";
+  switchTab(viewId, { updateUrl: false });
+}
+
+// All navigation, including analysis/detail shortcuts, uses the same URL state.
+function switchTab(viewId, { updateUrl = true } = {}) {
+  if (!Object.hasOwn(TAB_ROUTES, viewId)) return;
+  if (updateUrl) {
+    const url = new URL(window.location.href);
+    if (viewId === "viewMarketBoard") url.searchParams.delete("tab");
+    else url.searchParams.set("tab", TAB_ROUTES[viewId]);
+    if (url.href !== window.location.href) window.history.pushState(null, "", url.href);
+  }
   state.activeView = viewId;
   document.body?.setAttribute("data-active-view", viewId);
   for (const [tab, view] of [
@@ -2398,6 +2419,13 @@ elements.directionButtons.forEach((button) => {
 });
 
 // Navigation Tabs
+window.addEventListener("popstate", restoreTabFromUrl);
+document.getElementById("homeLink").addEventListener("click", (event) => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  switchTab("viewMarketBoard");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
 elements.tabMarkets.addEventListener("click", () => switchTab("viewMarketBoard"));
 elements.tabAnalytics.addEventListener("click", () => switchTab("viewBatchAnalytics"));
 elements.tabSymbolAnalysis.addEventListener("click", () => {
@@ -2464,5 +2492,6 @@ elements.symbolNextPage.addEventListener("click", () => {
 });
 
 // Initial Run
+restoreTabFromUrl();
 fetchMarkets();
 scheduleRefresh();

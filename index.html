@@ -4,13 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Hyper Funding Monitor</title>
+    <link rel="icon" type="image/png" href="./assets/logo.png" />
+    <link rel="apple-touch-icon" href="./assets/logo.png" />
     <!-- Modern Tech Google Font -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- ChartJS for Funding History Graphs -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=20260930-zero-crossings-1" />
+    <link rel="stylesheet" href="./styles.css?v=20260930-navigation-1" />
   </head>
   <body data-active-view="viewMarketBoard">
     <!-- Background grid decoration -->
@@ -20,13 +22,13 @@
     <main class="app-shell">
       <!-- Top Header Bar -->
       <header class="topbar">
-        <div class="brand-group">
-          <span class="logo-badge">HL</span>
+        <a class="brand-group" id="homeLink" href="./" aria-label="Funding Monitor home">
+          <img class="logo-badge" src="./assets/logo.png" alt="" width="42" height="42" />
           <div>
             <p class="eyebrow">Hyperliquid · Crypto &amp; Stocks</p>
             <h1>Funding Monitor</h1>
           </div>
-        </div>
+        </a>
         <div class="topbar-actions">
           <div class="status-pill" id="connectionStatus">
             <span class="status-dot"></span>
@@ -605,6 +607,6 @@
       </div>
     </main>
 
-    <script src="./app.js?v=20260930-zero-crossings-1"></script>
+    <script src="./app.js?v=20260930-navigation-1"></script>
   </body>
 </html>
