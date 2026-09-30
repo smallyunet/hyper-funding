@@ -169,6 +169,28 @@ test('exit basis convergence changes price P&L and exit perp fee', () => {
   assert.throws(() => run('modelFundingArbitrage(__points,100,90,1000,0.001,0.002,0,-1)'), /exit gap/);
 });
 
+test('fee details reconcile both legs and show the selected exit price and basis', () => {
+  run(`
+    __detailMarket = {spotMid:100,perpMid:90};
+    __detailResult = modelFundingArbitrage([{time:1,rate:0.01,cumulativeRate:0.01}],100,90,1000,0.001,0.002,0,0.05);
+    renderSimulatorCalculationDetails(__detailResult,__detailMarket,0.001,0.002,'custom');
+  `);
+  const result = run('__detailResult');
+  assert.equal(result.spotEntryFee + result.perpEntryFee, result.entryFees);
+  assert.equal(result.spotExitFee + result.perpExitFee, result.exitFees);
+  assert.match(node('simEntryDetails').innerHTML, /Spot buy fee: \$0\.4000/);
+  assert.match(node('simEntryDetails').innerHTML, /Perp short-open fee: \$0\.7200/);
+  assert.match(node('simExitDetails').innerHTML, /Perp short-close fee: \$0\.8400/);
+  assert.match(node('simBasisDetails').innerHTML, /Custom exit gap/);
+  assert.match(node('simBasisDetails').innerHTML, /\(105\.00000000 − 100\.00000000\) ÷ 100\.00000000/);
+  assert.match(node('simPnlDetails').textContent, /-\$60\.00/);
+  run('resetSimulator()');
+  for (const id of ['simEntryDetails', 'simExitDetails', 'simBasisDetails']) {
+    assert.doesNotMatch(node(id).textContent, /105|0\.8400/);
+  }
+  assert.equal(node('simPnlDetails').textContent, 'P&L calculation: --');
+});
+
 test('chart applies entry costs at open and exit costs after the last funding sample', () => {
   context.__points = [{time:3600000,rate:0.01,cumulativeRate:0.01},{time:7200000,rate:0.005,cumulativeRate:0.015}];
   const result = run('modelFundingArbitrage(__points,100,90,1000,0.001,0.002,0,0)');

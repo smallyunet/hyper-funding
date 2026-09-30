@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- ChartJS for Funding History Graphs -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=20260930-cost-events" />
+    <link rel="stylesheet" href="./styles.css?v=20260930-calculation-details" />
   </head>
   <body>
     <!-- Background grid decoration -->
@@ -540,6 +540,16 @@
               <article class="stat-box sim-net"><span class="stat-label">Modeled net P&amp;L</span><strong id="simNet">--</strong></article>
               <article class="stat-box"><span class="stat-label">Return on initial capital</span><strong id="simReturn">--</strong></article>
             </div>
+            <section class="sim-calculations" aria-label="Fee and basis calculation details">
+              <div class="symbol-table-heading"><div><h3>Fee &amp; basis details</h3><p>Calculations use the matched quantity and your selected fee rates and exit scenario.</p></div></div>
+              <div class="sim-detail-grid">
+                <article class="sim-detail-card"><h4>Entry fees · open both legs</h4><div id="simEntryDetails">Run a scenario to see each fee and its calculation.</div></article>
+                <article class="sim-detail-card"><h4>Exit fees · close both legs</h4><div id="simExitDetails">Run a scenario to see each fee and its calculation.</div></article>
+                <article class="sim-detail-card"><h4>Exit basis · price assumptions</h4><div id="simBasisDetails">Run a scenario to see exit prices and the basis formula.</div></article>
+              </div>
+              <p class="sim-source-note">Each fee = matched quantity × that leg's price × fee rate. Percentage inputs are divided by 100 (e.g. 0.07% = 0.0007). The perp rate is the total rate you enter; include any applicable XYZ deployer surcharge in it. No separate surcharge is calculated. Funding is shown separately; spread, slippage, borrowing and liquidation costs are excluded. Displayed amounts are rounded; totals use unrounded values.</p>
+              <p class="sim-event-summary" id="simPnlDetails">P&amp;L calculation: --</p>
+            </section>
             <p class="sim-source-note" id="simBasisComparison">Basis scenario comparison: --</p>
             <p class="sim-source-note" id="simCoverage">Coverage: --</p>
             <div class="symbol-chart-heading">
@@ -554,6 +564,6 @@
       </div>
     </main>
 
-    <script src="./app.js?v=20260930-cost-events"></script>
+    <script src="./app.js?v=20260930-calculation-details"></script>
   </body>
 </html>

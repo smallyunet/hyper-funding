@@ -964,8 +964,12 @@ function modelFundingArbitrage(points, spotMid, perpMid, capital, spotFee, perpF
   const spotExit = spotEntry;
   const perpEntry = quantity * perpMid;
   const perpExit = quantity * spotMid * (1 + exitBasisRate);
-  const entryFees = spotEntry * spotFee + perpEntry * perpFee;
-  const exitFees = spotExit * spotFee + perpExit * perpFee;
+  const spotEntryFee = spotEntry * spotFee;
+  const perpEntryFee = perpEntry * perpFee;
+  const spotExitFee = spotExit * spotFee;
+  const perpExitFee = perpExit * perpFee;
+  const entryFees = spotEntryFee + perpEntryFee;
+  const exitFees = spotExitFee + perpExitFee;
   const rawPricePnl = (spotExit - spotEntry) + (perpEntry - perpExit);
   const pricePnl = Math.abs(rawPricePnl) < 1e-8 ? 0 : rawPricePnl;
   const totalCost = entryFees + exitFees - pricePnl;
@@ -973,8 +977,38 @@ function modelFundingArbitrage(points, spotMid, perpMid, capital, spotFee, perpF
     fundingUsd: perpEntry * point.cumulativeRate,
     netUsd: perpEntry * point.cumulativeRate - totalCost,
   }));
-  return { quantity, spotEntry, spotExit, perpEntry, perpExit, entryFees, exitFees, pricePnl, exitBasisRate,
+  return { quantity, spotEntry, spotExit, perpEntry, perpExit, spotEntryFee, perpEntryFee, spotExitFee, perpExitFee,
+    entryFees, exitFees, pricePnl, exitBasisRate,
     fundingUsd: curve.at(-1).fundingUsd, netUsd: curve.at(-1).netUsd, returnRate: curve.at(-1).netUsd / capital, curve };
+}
+
+function renderSimulatorCalculationDetails(result, market, spotFee, perpFee, scenario) {
+  const number = (value) => formatNumber(value, 8);
+  const money = (value) => `${value < 0 ? "-" : ""}$${formatNumber(Math.abs(value), 4)}`;
+  const rate = (value) => `${formatNumber(value * 100, 6)}%`;
+  const quantity = number(result.quantity);
+  const line = (label, formula) => `<div class="sim-detail-line"><strong>${escapeHtml(label)}</strong><span class="sim-detail-formula">${escapeHtml(formula)}</span></div>`;
+  const feeLine = (label, price, notional, feeRate, fee) => line(`${label}: ${money(fee)}`,
+    `${quantity} × ${number(price)} = ${money(notional)} notional; ${money(notional)} × ${rate(feeRate)} = ${money(fee)}`);
+  const spotExitPrice = market.spotMid;
+  const perpExitPrice = spotExitPrice * (1 + result.exitBasisRate);
+  document.getElementById("simEntryDetails").innerHTML =
+    feeLine("Spot buy fee", market.spotMid, result.spotEntry, spotFee, result.spotEntryFee) +
+    feeLine("Perp short-open fee", market.perpMid, result.perpEntry, perpFee, result.perpEntryFee) +
+    line(`Total entry fees: ${money(result.entryFees)}`, `${money(result.spotEntryFee)} + ${money(result.perpEntryFee)} = ${money(result.entryFees)}`);
+  document.getElementById("simExitDetails").innerHTML =
+    feeLine("Spot sell fee", spotExitPrice, result.spotExit, spotFee, result.spotExitFee) +
+    feeLine("Perp short-close fee", perpExitPrice, result.perpExit, perpFee, result.perpExitFee) +
+    line(`Total exit fees: ${money(result.exitFees)}`, `${money(result.spotExitFee)} + ${money(result.perpExitFee)} = ${money(result.exitFees)}`);
+  const scenarioLabel = scenario === "converged" ? "Gap converges to zero" : scenario === "custom" ? "Custom exit gap" : "Current gap unchanged";
+  document.getElementById("simBasisDetails").innerHTML =
+    line(`Scenario: ${scenarioLabel}`, "Exit spot price is held at the current spot midpoint.") +
+    line(`Exit spot price: ${number(spotExitPrice)}`, `Exit perp price = exit spot price × (1 + exit basis rate) = ${number(spotExitPrice)} × (1 + ${number(result.exitBasisRate)}) = ${number(perpExitPrice)}`) +
+    line(`Exit basis: ${signedPercent(result.exitBasisRate)}`, `(Exit perp price − exit spot price) ÷ exit spot price × 100% = (${number(perpExitPrice)} − ${number(spotExitPrice)}) ÷ ${number(spotExitPrice)} × 100% = ${rate(result.exitBasisRate)}`) +
+    line(`Per-unit exit gap: ${money(perpExitPrice - spotExitPrice)}`, "Positive basis means perp is above spot; negative basis means perp is below spot. The percentage uses the spot price as its denominator.");
+  document.getElementById("simPnlDetails").textContent =
+    `Basis change P&L = quantity × [(spot exit − spot entry) + (perp entry − perp exit)] = ${quantity} × [(${number(spotExitPrice)} − ${number(market.spotMid)}) + (${number(market.perpMid)} − ${number(perpExitPrice)})] = ${formatSignedMoney(result.pricePnl)}. ` +
+    `Modeled net P&L = funding + basis change P&L − entry fees − exit fees = ${money(result.fundingUsd)} + (${money(result.pricePnl)}) − ${money(result.entryFees)} − ${money(result.exitFees)} = ${formatSignedMoney(result.netUsd)}.`;
 }
 
 function resetSimulator() {
@@ -985,6 +1019,10 @@ function resetSimulator() {
   document.getElementById("simCoverage").textContent = "Coverage: --";
   document.getElementById("simChartRange").textContent = "--";
   document.getElementById("simEventSummary").textContent = "Opening and closing costs: --";
+  for (const id of ["simEntryDetails", "simExitDetails", "simBasisDetails"]) {
+    document.getElementById(id).textContent = "Run a scenario to see the calculation details.";
+  }
+  document.getElementById("simPnlDetails").textContent = "P&L calculation: --";
   if (state.simChartInstance) { state.simChartInstance.destroy(); state.simChartInstance = null; }
 }
 
@@ -1077,6 +1115,7 @@ function renderSimulator() {
   set("simPricePnl", formatSignedMoney(result.pricePnl));
   set("simNet", formatSignedMoney(result.netUsd));
   set("simReturn", signedPercent(result.returnRate));
+  renderSimulatorCalculationDetails(result, market, spotFee, perpFee, elements.simExitScenario.value);
   const unchanged = modelFundingArbitrage(points, market.spotMid, market.perpMid, capital, spotFee, perpFee, market.sizeDecimals, currentBasisRate);
   const converged = modelFundingArbitrage(points, market.spotMid, market.perpMid, capital, spotFee, perpFee, market.sizeDecimals, 0);
   set("simBasisComparison", `If closed with current gap unchanged: ${formatSignedMoney(unchanged.netUsd)} net · If gap converges to zero: ${formatSignedMoney(converged.netUsd)} net. These are alternative exit assumptions, not observed future prices.`);

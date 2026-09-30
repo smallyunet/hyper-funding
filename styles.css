@@ -1381,6 +1381,14 @@ select:focus {
 .sim-result-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 22px; }
 .sim-source-note { color: var(--text-muted); font-size: 12px; line-height: 1.6; margin: 0 0 18px; }
 .sim-net { border-color: rgba(167, 139, 250, .5); background: rgba(167, 139, 250, .09); }
+.sim-calculations { margin: 22px 0; }
+.sim-calculations .symbol-table-heading { margin-bottom: 14px; }
+.sim-detail-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.sim-detail-card { min-width: 0; padding: 16px; border: 1px solid var(--line); border-radius: 10px; background: rgba(15, 23, 42, .4); font-size: 12px; line-height: 1.65; color: var(--text-secondary); overflow-wrap: anywhere; }
+.sim-detail-card h4 { margin: 0 0 12px; font-size: 13px; color: var(--text-primary); }
+.sim-detail-line + .sim-detail-line { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.sim-detail-line strong { display: block; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.sim-detail-formula { display: block; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .sim-price-grid strong { font-size: 14px; overflow-wrap: anywhere; }
 .sim-pair-scroll { max-height: 330px; min-height: 0; margin-bottom: 18px; }
 .sim-pair-scroll .analysis-table { min-width: 760px; }
@@ -1451,6 +1459,7 @@ select:focus {
 
 @media (max-width: 1100px) {
   .sim-workspace { grid-template-columns: 1fr; }
+  .sim-detail-grid { grid-template-columns: 1fr; }
   .symbol-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .sim-price-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .split-layout {
