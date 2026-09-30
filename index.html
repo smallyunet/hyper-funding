@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- ChartJS for Funding History Graphs -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=20260930-scenario-apr" />
+    <link rel="stylesheet" href="./styles.css?v=20260930-crypto-markets" />
   </head>
   <body>
     <!-- Background grid decoration -->
@@ -23,7 +23,7 @@
         <div class="brand-group">
           <span class="logo-badge">HL</span>
           <div>
-            <p class="eyebrow">Hyperliquid XYZ</p>
+            <p class="eyebrow">Hyperliquid · Crypto &amp; Stocks</p>
             <h1>Funding Monitor</h1>
           </div>
         </div>
@@ -42,7 +42,7 @@
       <section class="metrics-grid" aria-label="Market overview">
         <article class="metric-panel">
           <div class="metric-info">
-            <span class="metric-label">Total Markets</span>
+            <span class="metric-label">Matching Markets</span>
             <strong id="marketCount">--</strong>
           </div>
           <span class="metric-sub" id="updatedAt">--</span>
@@ -97,6 +97,7 @@
           <div class="split-left">
             <div class="panel-card filter-card">
               <div class="control-strip" aria-label="Controls">
+                <label class="select-field"><span>Asset category</span><select id="assetTypeSelect"><option value="all">All assets</option><option value="crypto">Crypto</option><option value="stocks">Stocks</option><option value="indices">Indices</option><option value="commodities">Commodities</option><option value="fx">FX</option><option value="preipo">Pre-IPO</option><option value="other">Other / unknown</option></select></label>
                 <label class="search-box">
                   <span>Search Symbol</span>
                   <div class="search-input-wrapper">
@@ -203,7 +204,7 @@
                 <div class="detail-header">
                   <div class="detail-symbol-area">
                     <div class="detail-title-group">
-                      <span class="symbol-badge-lg">XYZ</span>
+                      <span class="symbol-badge-lg" id="detailAssetBadge">Asset</span>
                       <h2 id="detailSymbolName">--</h2>
                     </div>
                     <p class="detail-subtitle" id="detailLeverageText">Max leverage: --</p>
@@ -430,11 +431,12 @@
         <section class="panel-card analysis-shell" aria-label="Single symbol analysis">
           <div class="analysis-header">
             <div>
-              <p class="eyebrow">XYZ MARKET HISTORY</p>
+              <p class="eyebrow">CRYPTO &amp; STOCK MARKET HISTORY</p>
               <h2 id="symbolAnalysisTitle">Symbol Analysis</h2>
               <p id="symbolAnalysisStatus" role="status">Select a symbol to inspect historical funding samples.</p>
             </div>
             <div class="analysis-actions">
+              <label class="select-field"><span>Asset category</span><select id="symbolAssetType"><option value="all">All assets</option><option value="crypto">Crypto</option><option value="stocks">Stocks</option><option value="indices">Indices</option><option value="commodities">Commodities</option><option value="fx">FX</option><option value="preipo">Pre-IPO</option><option value="other">Other / unknown</option></select></label>
               <label class="select-field compact-field">
                 <span>Symbol</span>
                 <select id="symbolAnalysisSelect" aria-label="Symbol to analyze"></select>
@@ -496,12 +498,13 @@
             <button class="text-button primary-btn" id="simRunButton" type="button">Refresh &amp; Simulate</button>
           </div>
           <div class="symbol-analysis-body">
-            <p class="analysis-note">Any listed US-stock spot / XYZ perp candidate with both current midpoint prices can be simulated, regardless of volume or order-book depth. Ticker-only matches may represent different assets or units. Historical funding rates are observed; entry uses current midpoints and exit uses a selected hypothetical gap. Neither is an executable fill or a historical trade.</p>
+            <p class="analysis-note">Any mapped crypto or stock spot / perp candidate with both current midpoint prices can be simulated, regardless of volume or order-book depth. Ticker-only matches may represent different assets or units. Historical funding rates are observed; entry uses current midpoints and exit uses a selected hypothetical gap. Neither is an executable fill or a historical trade.</p>
             <div class="sim-workspace">
               <section class="sim-workspace-section" aria-label="Scenario controls">
                 <div class="symbol-table-heading"><div><h3>Scenario controls</h3><p>Choose a pair, funding window, trade size and hypothetical exit.</p></div></div>
                 <div class="sim-input-grid">
-              <label class="select-field"><span>Stock pair</span><select id="simPair"><option value="">Loading pairs...</option></select></label>
+              <label class="select-field"><span>Asset category</span><select id="simAssetType"><option value="all">All assets</option><option value="crypto">Crypto</option><option value="stocks">Stocks</option><option value="indices">Indices</option><option value="commodities">Commodities</option><option value="fx">FX</option><option value="preipo">Pre-IPO</option><option value="other">Other / unknown</option></select></label>
+              <label class="select-field"><span>Spot / perp pair</span><select id="simPair"><option value="">Loading pairs...</option></select></label>
               <label class="select-field"><span>History window</span><select id="simWindow"><option value="7">7d</option><option value="14">14d</option><option value="30">30d</option><option value="60">60d</option><option value="90">90d</option><option value="180">180d</option><option value="365">1y</option></select></label>
               <label class="number-field"><span>Initial capital (USDC)</span><input id="simCapital" type="number" min="100" step="100" value="10000" /></label>
               <label class="number-field"><span>Spot taker fee (%)</span><input id="simSpotFee" type="number" min="0" max="10" step="0.001" value="0.07" /></label>
@@ -511,19 +514,19 @@
                 </div>
                 <p class="sim-source-note">The exit scenario holds the spot midpoint fixed and changes the perp midpoint to the target gap. It is a hypothetical close, not a forecast.</p>
               </section>
-              <section class="sim-workspace-section" aria-label="US stock pair candidates">
-                <div class="symbol-table-heading"><div><h3>US Stock Pair Candidates</h3><p>Select a row to inspect its quotes and run the scenario.</p></div></div>
+              <section class="sim-workspace-section" aria-label="Crypto and stock pair candidates">
+                <div class="symbol-table-heading"><div><h3>Crypto &amp; Stock Pair Candidates</h3><p>Select a row to inspect its quotes and run the scenario.</p></div></div>
                 <div class="table-scroll sim-pair-scroll">
               <table class="analysis-table">
                 <thead><tr><th>Pair</th><th class="num">Spot mid</th><th class="num">Perp mid</th><th class="num">Perp − spot</th><th class="num">Spot 24h vol</th><th>Action</th></tr></thead>
                 <tbody id="simPairRows"><tr><td colspan="6" class="empty-cell">Load markets to see eligible pairs</td></tr></tbody>
               </table>
                 </div>
-                <p class="sim-source-note" id="simPairStatus">Tokenized US stock pairs load from current Hyperliquid spot and XYZ perpetual markets.</p>
+                <p class="sim-source-note" id="simPairStatus">Mapped crypto and stock pairs load from current Hyperliquid spot, native perpetual and XYZ markets. Markets without mapped spot legs remain available in funding analysis.</p>
               </section>
             </div>
             <div class="sim-results-heading"><p class="eyebrow">RESULTS · HYPOTHETICAL CLOSE</p><h3>Scenario results</h3></div>
-            <p class="sim-source-note">Fees are editable estimates; verify your account's spot and XYZ perp fees, including any deployer surcharge. Half the capital is reserved for spot and half for 1× perp margin. The model ignores liquidity, bid/ask spread, slippage, borrowing, leverage, reinvestment, other future price moves and liquidation.</p>
+            <p class="sim-source-note">Fees are editable estimates; verify your account's spot and perp fees, including any deployer surcharge. Half the capital is reserved for spot and half for 1× perp margin. The model ignores liquidity, bid/ask spread, slippage, borrowing, leverage, reinvestment, other future price moves and liquidation.</p>
             <div class="sim-price-grid">
               <article class="stat-box"><span class="stat-label">Spot midpoint</span><strong id="simSpotQuote">--</strong></article>
               <article class="stat-box"><span class="stat-label">Perp midpoint</span><strong id="simPerpQuote">--</strong></article>
@@ -549,7 +552,7 @@
                 <article class="sim-detail-card"><h4>Exit fees · close both legs</h4><div id="simExitDetails">Run a scenario to see each fee and its calculation.</div></article>
                 <article class="sim-detail-card"><h4>Exit basis · price assumptions</h4><div id="simBasisDetails">Run a scenario to see exit prices and the basis formula.</div></article>
               </div>
-              <p class="sim-source-note">Each fee = matched quantity × that leg's price × fee rate. Percentage inputs are divided by 100 (e.g. 0.07% = 0.0007). The perp rate is the total rate you enter; include any applicable XYZ deployer surcharge in it. No separate surcharge is calculated. Funding is shown separately; spread, slippage, borrowing and liquidation costs are excluded. Displayed amounts are rounded; totals use unrounded values.</p>
+              <p class="sim-source-note">Each fee = matched quantity × that leg's price × fee rate. Percentage inputs are divided by 100 (e.g. 0.07% = 0.0007). The perp rate is the total rate you enter; include any applicable deployer surcharge in it. No separate surcharge is calculated. Funding is shown separately; spread, slippage, borrowing and liquidation costs are excluded. Displayed amounts are rounded; totals use unrounded values.</p>
               <p class="sim-event-summary" id="simPnlDetails">P&amp;L calculation: --</p>
             </section>
             <p class="sim-source-note" id="simBasisComparison">Basis scenario comparison: --</p>
@@ -566,6 +569,6 @@
       </div>
     </main>
 
-    <script src="./app.js?v=20260930-scenario-apr"></script>
+    <script src="./app.js?v=20260930-crypto-markets"></script>
   </body>
 </html>

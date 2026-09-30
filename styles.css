@@ -417,7 +417,7 @@ h1 {
 /* Filters Strip Styling */
 .control-strip {
   display: grid;
-  grid-template-columns: 1.4fr auto 1.2fr 0.9fr 0.9fr;
+  grid-template-columns: 1fr 1.3fr auto 1.1fr 0.8fr 0.8fr;
   gap: 16px;
   align-items: flex-end;
 }
@@ -697,7 +697,10 @@ select:focus {
 .symbol-chip {
   display: inline-grid;
   place-items: center;
-  width: 32px;
+  min-width: 40px;
+  padding: 0 6px;
+  white-space: nowrap;
+  flex-shrink: 0;
   height: 20px;
   border-radius: 6px;
   background: rgba(30, 41, 59, 0.8);
@@ -1436,7 +1439,7 @@ select:focus {
   }
   
   .control-strip {
-    grid-template-columns: 1.2fr auto 1.1fr 0.8fr 0.8fr;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   
   .detail-stats-grid {

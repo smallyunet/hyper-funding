@@ -37,6 +37,23 @@ const SIMULATOR_TICKER_MATCHES = [
   { spotToken: "TSLA", tokenId: "0xc8a24412041cdc4a167e7d3568fb6ebd", perp: "xyz:TSLA", label: "TSLA", fullName: "Tesla - Wagyu.xyz" },
 ];
 
+// Explicit 1:1 quantity mappings; token identity is checked against live metadata.
+const SIMULATOR_CRYPTO_PAIRS = [
+  { spotToken: "UBTC", tokenId: "0x8f254b963e8468305d409b33aa137c67", perp: "BTC", label: "BTC", fullName: "Unit Bitcoin" },
+  { spotToken: "UETH", tokenId: "0xe1edd30daaf5caac3fe63569e24748da", perp: "ETH", label: "ETH", fullName: "Unit Ethereum" },
+  { spotToken: "USOL", tokenId: "0x49b67c39f5566535de22b29b0e51e685", perp: "SOL", label: "SOL", fullName: "Unit Solana" },
+  { spotToken: "HYPE", tokenId: "0x0d01dc56dcaaca66ad901c959b4011ec", perp: "HYPE", label: "HYPE", fullName: "Hyperliquid" },
+  { spotToken: "PURR", tokenId: "0xc1fb593aeffbeb02f85e0308e9956a90", perp: "PURR", label: "PURR", fullName: null },
+];
+const ASSET_TYPES = { all: "All assets", crypto: "Crypto", stocks: "Stocks", indices: "Indices", commodities: "Commodities", fx: "FX", preipo: "Pre-IPO", other: "Other / unknown" };
+function marketCategory(symbol, dex = symbol.includes(":") ? symbol.split(":")[0] : "") {
+  if (!dex) return "crypto";
+  const category = state.marketMetadata.categories.get(symbol)?.toLowerCase();
+  return category && category in ASSET_TYPES && category !== "all" ? category : "other";
+}
+function categoryLabel(category) { return ASSET_TYPES[category] || ASSET_TYPES.other; }
+function matchesAssetType(item) { return state.assetType === "all" || item.category === state.assetType; }
+
 let historyRequestQueue = Promise.resolve();
 let lastHistoryRequestAt = 0;
 let historyWeightEvents = [];
@@ -54,6 +71,7 @@ const state = {
     loading: null,
     lastAttemptAt: 0,
   },
+  assetType: "all",
   direction: "all",
   sort: "funding-desc",
   search: "",
@@ -95,6 +113,7 @@ const elements = {
   lowestSymbol: document.getElementById("lowestSymbol"),
   directionSplit: document.getElementById("directionSplit"),
   searchInput: document.getElementById("searchInput"),
+  assetTypeSelects: ["assetTypeSelect", "symbolAssetType", "simAssetType"].map((id) => document.getElementById(id)),
   sortSelect: document.getElementById("sortSelect"),
   minVolumeInput: document.getElementById("minVolumeInput"),
   minOiInput: document.getElementById("minOiInput"),
@@ -161,25 +180,18 @@ async function fetchMarkets() {
   elements.analyzeTopButton.disabled = true;
 
   try {
-    const response = await fetch(API_URL, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ type: "metaAndAssetCtxs", dex: "xyz" }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const [meta, contexts] = await response.json();
-    state.rows = normalizeRows(meta?.universe, contexts);
+    // Commit both sources together so failed refreshes never mix quote ages.
+    const [nativeData, xyzData] = await Promise.all([
+      fetchInfo({ type: "metaAndAssetCtxs" }),
+      fetchInfo({ type: "metaAndAssetCtxs", dex: "xyz" }),
+    ]);
+    await loadSupplementalMetadata();
+    const rows = [...normalizeRows(nativeData?.[0]?.universe, nativeData?.[1], ""),
+      ...normalizeRows(xyzData?.[0]?.universe, xyzData?.[1], "xyz")];
+    state.rows = rows;
     state.marketFetchedAt = Date.now();
     state.marketStale = false;
-    loadSupplementalMetadata().then(() => {
-      if (state.selectedSymbol) {
-        updateDetailMetadata(state.selectedSymbol);
-      }
-    });
+    if (state.selectedSymbol) updateDetailMetadata(state.selectedSymbol);
     setStatus("ready", "Live");
     render();
   } catch (error) {
@@ -197,7 +209,7 @@ async function fetchMarkets() {
   }
 }
 
-function normalizeRows(universe, contexts) {
+function normalizeRows(universe, contexts, dex) {
   if (!Array.isArray(universe) || !Array.isArray(contexts) || universe.length !== contexts.length) {
     throw new Error("Market metadata and context lists are missing or misaligned");
   }
@@ -214,6 +226,9 @@ function normalizeRows(universe, contexts) {
 
       return {
         symbol: asset.name,
+        category: marketCategory(asset.name, dex),
+        isDelisted: Boolean(asset.isDelisted),
+        dex: dex ?? (asset.name.includes(":") ? asset.name.split(":")[0] : ""),
         displaySymbol: asset.name.replace("xyz:", ""),
         funding,
         apr: funding * HOURS_PER_YEAR,
@@ -228,13 +243,13 @@ function normalizeRows(universe, contexts) {
         lastGrowthModeChangeTime: asset.lastGrowthModeChangeTime,
       };
     })
-    .filter((row) => Number.isFinite(row.funding) && row.symbol);
+    .filter((row) => !row.isDelisted && Number.isFinite(row.funding) && row.symbol);
 }
 
 function render() {
   const rows = applyFiltersAndSort();
   state.filteredRows = rows;
-  renderMetrics(state.rows);
+  renderMetrics(rows);
   renderTable(rows);
   renderAnalysis();
   renderSymbolOptions();
@@ -244,6 +259,14 @@ function render() {
   // UX Optimization: Auto-select the first market on initial load
   if (!state.selectedSymbol && rows.length > 0) {
     selectSymbol(rows[0].symbol);
+  } else if (state.selectedSymbol && !rows.some((row) => row.symbol === state.selectedSymbol)) {
+    if (rows.length) selectSymbol(rows[0].symbol);
+    else {
+      state.selectedSymbol = null;
+      state.detailHistoryRequest += 1;
+      elements.detailPanelContent.classList.add("hidden");
+      elements.detailEmptyState.classList.remove("hidden");
+    }
   } else if (state.selectedSymbol) {
     // Keep live metrics fresh on auto-refresh
     updateDetailPanelLiveMetrics(state.selectedSymbol);
@@ -256,6 +279,7 @@ function render() {
 function applyFiltersAndSort() {
   const query = state.search.trim().toLowerCase();
   const rows = state.rows.filter((row) => {
+    if (!matchesAssetType(row)) return false;
     if (query && !row.symbol.toLowerCase().includes(query)) return false;
     if (state.direction === "positive" && row.funding <= 0) return false;
     if (state.direction === "negative" && row.funding >= 0) return false;
@@ -318,7 +342,7 @@ function renderTable(rows) {
         <tr data-symbol="${escapeHtml(row.symbol)}" class="${isActive}">
           <td>
             <div class="symbol-cell">
-              <span class="symbol-chip">XYZ</span>
+              <span class="symbol-chip">${escapeHtml(categoryLabel(row.category || marketCategory(row.symbol)))}</span>
               <span>${escapeHtml(row.displaySymbol)}</span>
               <button class="row-analysis-button compact-analyze" type="button" data-analyze-symbol="${escapeHtml(row.symbol)}" aria-label="Analyze ${escapeHtml(row.displaySymbol)}">Analyze →</button>
             </div>
@@ -365,7 +389,7 @@ function renderAnalysis() {
         <tr data-symbol="${escapeHtml(row.symbol)}">
           <td>
             <div class="symbol-cell">
-              <span class="symbol-chip">XYZ</span>
+              <span class="symbol-chip">${escapeHtml(categoryLabel(row.category || marketCategory(row.symbol)))}</span>
               <span>${escapeHtml(row.displaySymbol)}</span>
               <button class="row-analysis-button compact-analyze" type="button" data-analyze-symbol="${escapeHtml(row.symbol)}" aria-label="Analyze ${escapeHtml(row.displaySymbol)}">Analyze →</button>
             </div>
@@ -402,6 +426,7 @@ async function selectSymbol(symbol, isManual = false) {
   
   // Render main details card header
   document.getElementById("detailSymbolName").textContent = row.displaySymbol;
+  document.getElementById("detailAssetBadge").textContent = categoryLabel(row.category);
   document.getElementById("detailLeverageText").textContent = `Max Leverage: ${row.maxLeverage ? row.maxLeverage + 'x' : '--'}`;
   
   // Live Metrics updates
@@ -493,20 +518,6 @@ async function loadFullAnnotation(symbol) {
   }
 }
 
-async function fetchInfo(body) {
-  const response = await fetch(API_URL, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
-
-  return response.json();
-}
-
 function updateDetailMetadata(symbol) {
   const row = state.rows.find((item) => item.symbol === symbol);
   if (!row) return;
@@ -514,14 +525,14 @@ function updateDetailMetadata(symbol) {
   const fullAnnotation = state.marketMetadata.fullAnnotations.get(symbol);
   const conciseAnnotation = state.marketMetadata.conciseAnnotations.get(symbol);
   const annotation = fullAnnotation || conciseAnnotation || {};
-  const category = annotation.category || state.marketMetadata.categories.get(symbol);
+  const category = row.category === "other" ? annotation.category || "other" : row.category;
   const keywords = Array.isArray(annotation.keywords) ? annotation.keywords : [];
   const oiCap = toNumber(state.marketMetadata.oiCaps.get(symbol));
 
   document.getElementById("detailMetadataSource").textContent = state.marketMetadata.loaded
     ? "Hyperliquid metadata"
     : state.marketMetadata.loading ? "Loading optional sources" : "Optional metadata partial / unavailable";
-  document.getElementById("detailCategory").textContent = formatOptional(category);
+  document.getElementById("detailCategory").textContent = categoryLabel(category);
   document.getElementById("detailOiCap").textContent = Number.isFinite(oiCap) ? formatUsd(oiCap) : "Not available";
   document.getElementById("detailMarginMode").textContent = formatOptional(formatMode(row.marginMode));
   document.getElementById("detailGrowthMode").textContent = formatOptional(formatMode(row.growthMode));
@@ -751,7 +762,7 @@ function switchTab(viewId) {
 
 function renderSymbolOptions() {
   const previous = state.symbolAnalysisSymbol || elements.symbolAnalysisSelect.value;
-  const symbols = [...state.rows].sort((a, b) => a.displaySymbol.localeCompare(b.displaySymbol));
+  const symbols = state.rows.filter(matchesAssetType).sort((a, b) => a.displaySymbol.localeCompare(b.displaySymbol));
   const optionsKey = symbols.map((row) => row.symbol).join("\u0000");
   if (optionsKey !== state.symbolOptionsKey) {
     elements.symbolAnalysisSelect.innerHTML = symbols.map((row) =>
@@ -793,7 +804,7 @@ function resetSymbolAnalysis() {
 
 async function analyzeSelectedSymbol() {
   const symbol = elements.symbolAnalysisSelect.value;
-  if (!symbol || !state.rows.some((row) => row.symbol === symbol)) return;
+  if (!symbol || !state.rows.some((row) => row.symbol === symbol && matchesAssetType(row))) return;
   const days = Number(elements.symbolHistoryWindowSelect.value) || 7;
   const requestId = ++state.symbolAnalysisRequest;
   state.symbolAnalysisSymbol = symbol;
@@ -886,7 +897,13 @@ async function fetchInfo(payload) {
   return response.json();
 }
 
-function findSimulatorPairs(spotData, perpData) {
+function findSimulatorPairs(spotData, perpData, nativeData) {
+  if (nativeData) {
+    // Validate each source before combining its index-aligned contexts.
+    normalizeRows(nativeData?.[0]?.universe, nativeData?.[1], "");
+    normalizeRows(perpData?.[0]?.universe, perpData?.[1], "xyz");
+    perpData = [{ universe: [...perpData[0].universe, ...nativeData[0].universe] }, [...perpData[1], ...nativeData[1]]];
+  }
   const [spotMeta, spotContexts] = spotData;
   const [perpMeta, perpContexts] = perpData;
   if (!Array.isArray(spotMeta?.universe) || !Array.isArray(spotMeta.tokens) ||
@@ -899,7 +916,7 @@ function findSimulatorPairs(spotData, perpData) {
   const perps = new Map(perpMeta.universe.map((asset, index) => [asset.name, { asset, context: perpContexts[index] }]));
   const usdc = [...tokens.values()].find((token) => token.name === "USDC" && token.isCanonical === true);
   if (!usdc) throw new Error("Canonical USDC spot token is unavailable");
-  return [...SIMULATOR_PAIRS, ...SIMULATOR_TICKER_MATCHES].flatMap((definition) => {
+  return [...SIMULATOR_CRYPTO_PAIRS, ...SIMULATOR_PAIRS, ...SIMULATOR_TICKER_MATCHES].flatMap((definition) => {
     const token = [...tokens.values()].find((item) => item.name === definition.spotToken &&
       item.tokenId === definition.tokenId &&
       (definition.fullName === null ? item.fullName == null : item.fullName === definition.fullName));
@@ -912,11 +929,11 @@ function findSimulatorPairs(spotData, perpData) {
     if (!token || !pair || !perp || perp.asset.isDelisted) return [];
     const hasQuotes = spotMid > 0 && perpMid > 0;
     const reason = hasQuotes ? "" : "No current midpoint on both legs";
-    const warning = [SIMULATOR_TICKER_MATCHES.includes(definition) ? "Ticker match; underlying unverified" : "",
+    const warning = [definition.spotToken.startsWith("U") ? "Unit token; wrapper / redemption risk" : "", SIMULATOR_TICKER_MATCHES.includes(definition) ? "Ticker match; underlying unverified" : "",
       volume === 0 ? "No spot trades in 24h" : "",
       hasQuotes && Math.abs(spotMid - perpMid) / perpMid > 0.05 ? "Midpoint gap > 5%" : ""]
       .filter(Boolean).join(" · ");
-    return [{ ...definition, spotCoin: pair.name, spotIndex: pair.index, spotMid, perpMid, volume,
+    return [{ ...definition, category: SIMULATOR_CRYPTO_PAIRS.includes(definition) ? "crypto" : "stocks", spotCoin: pair.name, spotIndex: pair.index, spotMid, perpMid, volume,
       reason, warning, eligible: hasQuotes, sizeDecimals: Math.min(token.szDecimals, perp.asset.szDecimals) }];
   }).sort((a, b) => Number(b.eligible) - Number(a.eligible));
 }
@@ -925,7 +942,7 @@ function renderSimulatorPairList(pairs, selected) {
   elements.simPairRows.innerHTML = pairs.length ? pairs.map((pair) => `
     <tr class="sim-pair-row ${pair.spotCoin === selected ? "selected" : ""}">
       <td>
-        <strong>${escapeHtml(pair.label)}</strong> <span class="stat-desc">${escapeHtml(pair.spotToken)}/USDC ↔ ${escapeHtml(pair.perp)}</span>
+        <span class="symbol-chip">${escapeHtml(categoryLabel(pair.category))}</span> <strong>${escapeHtml(pair.label)}</strong> <span class="stat-desc">${escapeHtml(pair.spotToken)}/USDC ↔ ${escapeHtml(pair.perp)}</span>
         <div class="sim-pair-links">
           <a href="https://app.hyperliquid.xyz/trade/${encodeURIComponent(pair.spotToken)}/USDC" target="_blank" rel="noopener noreferrer" aria-label="Open ${escapeHtml(pair.spotToken)}/USDC spot on Hyperliquid">Spot ↗</a>
           <a href="https://app.hyperliquid.xyz/trade/${encodeURIComponent(pair.perp)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${escapeHtml(pair.perp)} perpetual on Hyperliquid">Perp ↗</a>
@@ -946,7 +963,7 @@ function renderSimulatorPairOptions(pairs) {
   return pairs.length ?
     `<optgroup label="Midpoint scenario available">${options(pairs.filter((pair) => pair.eligible))}</optgroup>` +
     `<optgroup label="No two-sided midpoint">${options(pairs.filter((pair) => !pair.eligible))}</optgroup>` :
-    `<option value="">No stock pairs available</option>`;
+    `<option value="">No mapped spot/perp pairs in this category</option>`;
 }
 
 function modelFundingArbitrage(points, spotMid, perpMid, capital, spotFee, perpFee, sizeDecimals, exitBasisRate = (perpMid - spotMid) / spotMid) {
@@ -1047,23 +1064,26 @@ async function runSimulator() {
   const days = Number(elements.simWindow.value);
   try {
     if (![7, 14, 30, 60, 90, 180, 365].includes(days)) throw new Error("Select a supported history window");
-    const [spotData, perpData] = await Promise.all([
+    const [spotData, perpData, nativeData] = await Promise.all([
       fetchInfo({ type: "spotMetaAndAssetCtxs" }),
       fetchInfo({ type: "metaAndAssetCtxs", dex: "xyz" }),
+      fetchInfo({ type: "metaAndAssetCtxs" }),
     ]);
     if (requestId !== state.simRequest) return;
-    const pairs = findSimulatorPairs(spotData, perpData);
+    const pairs = findSimulatorPairs(spotData, perpData, nativeData).filter(matchesAssetType);
     state.simPairs = pairs;
     const eligiblePairs = pairs.filter((pair) => pair.eligible);
     elements.simPair.innerHTML = renderSimulatorPairOptions(pairs);
     if (!pairs.length) {
       renderSimulatorPairList(pairs, "");
-      throw new Error("No US stock pair candidates are listed in the current market metadata");
+      elements.simPairStatus.textContent = "No mapped USDC spot/perp pairs in this category. Markets without a mapped spot leg remain available in funding analysis.";
+      elements.simStatus.textContent = "No simulator pairs for the selected asset category";
+      return;
     }
     const market = pairs.find((pair) => pair.spotCoin === requestedPair) || eligiblePairs[0] || pairs[0];
     elements.simPair.value = market.spotCoin;
     renderSimulatorPairList(pairs, market.spotCoin);
-    elements.simPairStatus.textContent = `${eligiblePairs.length} midpoint scenarios · ${pairs.length} US-stock ticker candidates listed · ${market.spotToken}/USDC market ${market.spotCoin} · token ${market.tokenId} · 24h spot volume ${formatMoney(market.volume)}.${market.warning ? ` ${market.warning}.` : ""} Midpoint prices do not show executable costs.`;
+    elements.simPairStatus.textContent = `${eligiblePairs.length} midpoint scenarios · ${pairs.length} mapped crypto / stock candidates listed · ${market.spotToken}/USDC market ${market.spotCoin} · token ${market.tokenId} · 24h spot volume ${formatMoney(market.volume)}.${market.warning ? ` ${market.warning}.` : ""} Midpoint prices do not show executable costs.`;
     elements.simRunButton.textContent = market.eligible ? "Refresh & Simulate" : "Refresh Pair";
     if (!market.eligible) {
       elements.simStatus.textContent = `${market.spotToken}/USDC + ${market.perp}: ${market.reason}. Select a pair under “Midpoint scenario available” to simulate.`;
@@ -1616,7 +1636,7 @@ function getSortLabel(sortValue) {
 }
 
 function getActiveFiltersDescription() {
-  const parts = [];
+  const parts = [`Assets: ${categoryLabel(state.assetType)}`];
   if (state.search.trim()) {
     parts.push(`Search: "${state.search.trim()}"`);
   }
@@ -1712,6 +1732,8 @@ function scheduleRefresh() {
 function exportCsv() {
   const header = [
     "symbol",
+    "asset_category",
+    "perp_dex",
     "funding_per_hour",
     "apr_estimate",
     "mark",
@@ -1723,6 +1745,8 @@ function exportCsv() {
   const lines = state.filteredRows.map((row) =>
     [
       row.symbol,
+      row.category,
+      row.dex || "native",
       row.funding,
       row.apr,
       row.mark,
@@ -1811,6 +1835,30 @@ function escapeHtml(value) {
 }
 
 // Event Listeners Binding
+function setAssetType(value) {
+  if (!(value in ASSET_TYPES)) return;
+  cancelBatchAnalysis("Asset category changed; run analysis again");
+  state.assetType = value;
+  elements.assetTypeSelects.forEach((select) => { select.value = value; });
+  state.symbolAnalysisRequest += 1;
+  state.symbolAnalysisSymbol = null;
+  elements.symbolAnalysisTitle.textContent = "Symbol Analysis";
+  elements.symbolAnalysisStatus.textContent = "Asset category changed; select a symbol and run analysis.";
+  resetSymbolAnalysis();
+  state.simRequest += 1;
+  state.simSnapshot = null;
+  state.simPairs = [];
+  elements.simRunButton.disabled = false;
+  elements.simStatus.textContent = "Asset category changed; load mapped pairs to run a scenario.";
+  elements.simPair.innerHTML = '<option value="">Load pairs for this category</option>';
+  elements.simPairRows.innerHTML = '<tr><td colspan="6" class="empty-cell">Load pairs for this category</td></tr>';
+  elements.simPairStatus.textContent = "Only explicitly mapped USDC spot/perp pairs can be simulated. Other markets remain available in funding analysis.";
+  resetSimulator();
+  render();
+  if (state.activeView === "viewSimulator") runSimulator();
+}
+elements.assetTypeSelects.forEach((select) => select.addEventListener("change", (event) => setAssetType(event.target.value)));
+
 elements.refreshButton.addEventListener("click", fetchMarkets);
 elements.exportButton.addEventListener("click", exportCsv);
 elements.analyzeTopButton.addEventListener("click", analyzeTopMarkets);

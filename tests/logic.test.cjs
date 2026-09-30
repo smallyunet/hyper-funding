@@ -229,3 +229,74 @@ test('midpoint simulator requires both prices and a tradable size increment', ()
   assert.throws(() => run('modelFundingArbitrage(__points,0,100,1000,0,0,0)'), /capital/);
   assert.throws(() => run('modelFundingArbitrage(__points,10000,10000,1000,0,0,0)'), /size increment/);
 });
+
+test('native crypto and classified XYZ markets keep distinct identities and omit delisted assets', () => {
+  run("state.marketMetadata.categories = new Map([['xyz:NVDA','stocks'],['xyz:GOLD','commodities'],['xyz:EUR','FX']])");
+  const rows = run(`normalizeRows([{name:'BTC'}, {name:'OLD',isDelisted:true}], [{funding:'0'},{funding:'0'}], '')`);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].symbol, 'BTC');
+  assert.equal(rows[0].category, 'crypto');
+  assert.equal(run("marketCategory('xyz:NVDA')"), 'stocks');
+  assert.equal(run("marketCategory('xyz:GOLD')"), 'commodities');
+  assert.equal(run("marketCategory('xyz:EUR')"), 'fx');
+  assert.equal(run("marketCategory('xyz:NEW')"), 'other');
+});
+
+test('category filtering feeds market board and symbol selector without mixing stocks or commodities', () => {
+  run(`state.rows = [{symbol:'BTC',displaySymbol:'BTC',category:'crypto',funding:0.01},
+    {symbol:'xyz:NVDA',displaySymbol:'NVDA',category:'stocks',funding:0.02},
+    {symbol:'xyz:GOLD',displaySymbol:'GOLD',category:'commodities',funding:0.03}];
+    state.assetType = 'crypto'; state.search = ''; state.direction = 'all'; state.minVolume = 0; state.minOi = 0;
+    renderSymbolOptions();`);
+  assert.deepEqual(Array.from(run('applyFiltersAndSort()'), row => row.symbol), ['BTC']);
+  assert.match(node('symbolAnalysisSelect').innerHTML, /BTC/);
+  assert.doesNotMatch(node('symbolAnalysisSelect').innerHTML, /NVDA|GOLD/);
+  run("state.assetType = 'all'");
+});
+
+test('crypto simulator maps Unit Bitcoin to BTC by token identity and context coin, rejecting impostors', () => {
+  context.__cryptoSpot = [{universe:[{name:'@142',index:142,tokens:[1,0]}, {name:'@999',index:999,tokens:[2,0]}],tokens:[
+    {index:0,name:'USDC',isCanonical:true},
+    {index:1,name:'UBTC',tokenId:'0x8f254b963e8468305d409b33aa137c67',fullName:'Unit Bitcoin',szDecimals:5},
+    {index:2,name:'UBTC',tokenId:'impostor',fullName:'Unit Bitcoin',szDecimals:5}
+  ]}, [{coin:'@999',midPx:'1'},{coin:'@142',midPx:'83000',dayNtlVlm:'1000'}]];
+  context.__native = [{universe:[{name:'BTC',szDecimals:5}]},[{funding:'0.0001',midPx:'83100'}]];
+  const pairs = run('findSimulatorPairs(__cryptoSpot, [{universe:[]},[]], __native)');
+  assert.equal(pairs.length, 1);
+  assert.equal(pairs[0].perp, 'BTC');
+  assert.equal(pairs[0].spotCoin, '@142');
+  assert.equal(pairs[0].category, 'crypto');
+  assert.equal(pairs[0].perpMid, 83100);
+  assert.equal(pairs[0].eligible, true);
+  assert.match(pairs[0].warning, /wrapper/);
+  run("state.assetType = 'stocks'");
+  assert.equal(run('findSimulatorPairs(__cryptoSpot, [{universe:[]},[]], __native).filter(matchesAssetType).length'), 0);
+  run("state.assetType = 'all'");
+});
+
+test('a failed market source keeps the last complete snapshot and marks it stale', async () => {
+  run("state.rows = [{symbol:'BTC',displaySymbol:'BTC',category:'crypto',funding:0.01}]; state.filteredRows = state.rows; state.selectedSymbol = 'BTC'; state.loading = false; state.marketMetadata.loaded = true;");
+  context.fetch = async (_url, request) => {
+    const body = JSON.parse(request.body);
+    if (body.dex === 'xyz') return {ok:false,status:503};
+    return {ok:true,json:async () => [{universe:[{name:'ETH'}]},[{funding:'0.0001'}]]};
+  };
+  await run('fetchMarkets()');
+  assert.equal(run('state.marketStale'), true);
+  assert.equal(run('state.rows[0].symbol'), 'BTC');
+  assert.equal(node('statusText').textContent, 'Stale data');
+});
+
+test('category changes invalidate all previous analysis and unlock cancelled simulator controls', () => {
+  run("state.rows = []; state.filteredRows = []; state.selectedSymbol = null; state.activeView = 'viewMarketBoard'; state.simSnapshot = {}; state.analysisRows = []; state.symbolAnalysisPoints = [{time:1}];");
+  node('simRunButton').disabled = true;
+  const oldRequest = run('state.simRequest');
+  run("setAssetType('commodities')");
+  assert.equal(run('state.simSnapshot'), null);
+  assert.equal(run('state.symbolAnalysisPoints.length'), 0);
+  assert.equal(run('state.simRequest'), oldRequest + 1);
+  assert.equal(node('simRunButton').disabled, false);
+  assert.equal(node('symbolAnalysisTitle').textContent, 'Symbol Analysis');
+  for (const id of ['assetTypeSelect','symbolAssetType','simAssetType']) assert.equal(node(id).value, 'commodities');
+  run("state.assetType = 'all'");
+});
