@@ -21,7 +21,7 @@ The page calls Hyperliquid's public `info` endpoint from the browser, loading bo
 
 - List active native crypto and XYZ perpetual funding rates; exclude delisted markets.
 - Filter by asset category (Crypto, Stocks, Indices, Commodities, FX, Pre-IPO, Other / unknown), with synchronized selectors in Market Board, Symbol Analysis and Simulator. Stocks includes all officially classified stocks, not only US listings. CSV exports retain category and market source.
-- Sort by funding, APR estimate, volume, open interest, and basis.
+- Click table headers to sort by symbol, funding, APR estimate, price, basis, open interest, volume, or maximum leverage; click again to reverse direction. The active header shows an arrow. Batch selection and CSV export follow the same order.
 - Filter by symbol, funding direction, minimum 24h volume, and minimum open interest.
 - Export the currently filtered table as CSV.
 - Auto refresh every 30 seconds.
@@ -43,6 +43,10 @@ The model reserves half of initial capital for spot and half for 1× perp margin
 Sources: [Hyperliquid spot metadata](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint/spot), [perpetual contexts and funding history](https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/info-endpoint/perpetuals), [fees](https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees), [funding](https://hyperliquid.gitbook.io/hyperliquid-docs/trading/funding), and [Unit tokenization](https://docs.hyperunit.xyz/).
 
 Market refreshes load native and XYZ sources together. If either source fails or has misaligned metadata, the prior complete snapshot stays visible as stale. Official XYZ classifications are used when available; missing classifications remain Other / unknown. Native perps are classified as Crypto. Category changes cancel previous batch results and invalidate single-symbol and simulator results.
+
+## Interface
+
+The Market Board uses clickable sort headers, a collapsible details column, and sticky symbol/action columns. Analysis tabs share a compact market status strip and synchronized category controls. Batch results can be sorted while incomplete windows remain below complete windows; headline metrics are independent of the chosen result sort. Single-symbol analysis prioritizes four signals, its chart, and 50-row sample pages. The Simulator shows parameters beside its result summary and chart, with expandable fees, quote details, calculation methods and pair candidates. Its calculation assumptions and coverage semantics are unchanged. Narrow screens stack the workspace; tables scroll within their own containers.
 
 ## Next Scope
 

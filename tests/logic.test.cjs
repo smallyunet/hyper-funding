@@ -300,3 +300,16 @@ test('category changes invalidate all previous analysis and unlock cancelled sim
   for (const id of ['assetTypeSelect','symbolAssetType','simAssetType']) assert.equal(node(id).value, 'commodities');
   run("state.assetType = 'all'");
 });
+
+test('batch result sorting retains complete-first ranking and independent highest-score summary', () => {
+  run(`state.analysisRows = [
+    {symbol:'BTC',displaySymbol:'BTC',complete:true,score:80,avgApr:0.1,avgFunding:0.1,volatility:0.1,directionHitRate:0.8,samples:168,expectedSamples:168,positiveCount:168,negativeCount:0},
+    {symbol:'ETH',displaySymbol:'ETH',complete:true,score:20,avgApr:0.3,avgFunding:0.3,volatility:0.1,directionHitRate:0.8,samples:168,expectedSamples:168,positiveCount:168,negativeCount:0},
+    {symbol:'SOL',displaySymbol:'SOL',complete:false,score:99,avgApr:0.5,avgFunding:0.5,volatility:0.1,directionHitRate:0.8,samples:10,expectedSamples:168,positiveCount:10,negativeCount:0}
+  ]; state.analysisSort = 'apr-desc'; renderAnalysis();`);
+  assert.deepEqual(Array.from(run('sortAnalysisRows(state.analysisRows)'), row => row.symbol), ['ETH','BTC','SOL']);
+  assert.equal(node('bestScoreSymbol').textContent, 'BTC');
+  assert.equal(node('bestAvgAprSymbol').textContent, 'ETH');
+  assert.match(node('analysisRows').innerHTML, /coverage-badge partial/);
+  run("state.analysisRows = []; state.analysisSort = 'score-desc'");
+});

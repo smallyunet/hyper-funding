@@ -10,9 +10,9 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- ChartJS for Funding History Graphs -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=20260930-crypto-markets" />
+    <link rel="stylesheet" href="./styles.css?v=20260930-workspace-design-2" />
   </head>
-  <body>
+  <body data-active-view="viewMarketBoard">
     <!-- Background grid decoration -->
     <div class="bg-grid-dec"></div>
     <div class="bg-glow-dec"></div>
@@ -70,6 +70,7 @@
         </article>
       </section>
 
+      <div class="workspace-status" aria-live="polite"><span id="workspaceScope">All assets</span><span id="workspaceFreshness">Waiting for market data</span></div>
       <!-- Tab Navigation -->
       <nav class="tab-navigation" role="tablist">
         <button class="tab-btn active" id="tabMarkets" type="button" role="tab" aria-selected="true" data-target="viewMarketBoard">
@@ -114,18 +115,6 @@
                   </div>
                 </div>
 
-                <label class="select-field">
-                  <span>Sort By</span>
-                  <select id="sortSelect">
-                    <option value="funding-desc">Funding (H → L)</option>
-                    <option value="funding-asc">Funding (L → H)</option>
-                    <option value="apr-desc">Est. APR (H → L)</option>
-                    <option value="volume-desc">24h Vol (H → L)</option>
-                    <option value="oi-desc">Open Interest (H → L)</option>
-                    <option value="basis-desc">Basis (H → L)</option>
-                  </select>
-                </label>
-
                 <label class="number-field">
                   <span>Min 24h Vol</span>
                   <input id="minVolumeInput" type="number" min="0" step="50000" placeholder="$0" />
@@ -145,6 +134,7 @@
                   <p id="resultCount">-- rows</p>
                 </div>
                 <div class="table-tools">
+                  <button class="text-button secondary" id="toggleMarketDetails" type="button" aria-expanded="true">Hide details</button>
                   <button class="text-button" id="exportButton" type="button">
                     <svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none" class="btn-icon"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
                     Export CSV
@@ -161,14 +151,14 @@
                 <table class="market-table">
                   <thead>
                     <tr>
-                      <th>Symbol</th>
-                      <th class="num">Funding / Hr</th>
-                      <th class="num">Est. APR</th>
-                      <th class="num">Price</th>
-                      <th class="num">Basis</th>
-                      <th class="num">Open Interest</th>
-                      <th class="num">24h Volume</th>
-                      <th class="num">Max Lev</th>
+                      <th scope="col" aria-sort="none"><button type="button" class="market-sort-button" data-market-sort="symbol">Symbol <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                      <th scope="col" class="num" aria-sort="none"><button type="button" class="market-sort-button" data-market-sort="funding">Funding / Hr <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                      <th scope="col" class="num" aria-sort="none"><button type="button" class="market-sort-button" data-market-sort="apr">Est. APR <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                      <th scope="col" class="num" aria-sort="none"><button type="button" class="market-sort-button" data-market-sort="price">Price <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                      <th scope="col" class="num" aria-sort="none"><button type="button" class="market-sort-button" data-market-sort="basis">Basis <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                      <th scope="col" class="num" aria-sort="none"><button type="button" class="market-sort-button" data-market-sort="oi">Open Interest <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                      <th scope="col" class="num" aria-sort="none"><button type="button" class="market-sort-button" data-market-sort="volume">24h Volume <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                      <th scope="col" class="num" aria-sort="none"><button type="button" class="market-sort-button" data-market-sort="leverage">Max Lev <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
                       <th>Analysis</th>
                     </tr>
                   </thead>
@@ -254,9 +244,9 @@
                       <strong id="detailGrowthMode">Not available</strong>
                     </div>
                   </div>
-                  <p class="metadata-description" id="detailDescription">No annotation available.</p>
+                  <details class="market-description"><summary>About this market</summary><p class="metadata-description" id="detailDescription">No annotation available.</p>
                   <div class="metadata-keywords" id="detailKeywords"></div>
-                  <div class="metadata-links" id="detailLinks"></div>
+                  </details><div class="metadata-links" id="detailLinks"></div>
                 </div>
 
                 <!-- History Analysis & Chart Card -->
@@ -340,6 +330,7 @@
               <p id="analysisStatus" role="status">Run analysis to load historical samples.</p>
             </div>
             <div class="analysis-actions">
+              <label class="select-field compact-field"><span>Asset category</span><select id="batchAssetType"><option value="all">All assets</option><option value="crypto">Crypto</option><option value="stocks">Stocks</option><option value="indices">Indices</option><option value="commodities">Commodities</option><option value="fx">FX</option><option value="preipo">Pre-IPO</option><option value="other">Other / unknown</option></select></label>
               <label class="select-field compact-field">
                 <span>Analysis Window</span>
                 <select id="historyWindowSelect">
@@ -368,7 +359,7 @@
                 Analyze Current Top
               </button>
               <button class="text-button secondary" id="cancelAnalysisButton" type="button" disabled>Cancel</button>
-              <button class="text-button secondary" id="clearHistoryCacheButton" type="button">Clear Cache</button>
+              <details class="maintenance-menu"><summary>More</summary><button class="text-button secondary" id="clearHistoryCacheButton" type="button">Clear Cache</button></details>
             </div>
           </div>
 
@@ -405,14 +396,14 @@
             <table class="analysis-table">
               <thead>
                 <tr>
-                  <th>Symbol</th>
-                  <th class="num">Funding Score</th>
-                  <th class="num">Avg / Hour</th>
-                  <th class="num">Avg APR</th>
-                  <th class="num">Volatility (SD)</th>
-                  <th class="num">Direction Hit Rate</th>
+                  <th scope="col" aria-sort="none"><button type="button" class="market-sort-button" data-batch-sort="symbol">Symbol <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                  <th scope="col" class="num" aria-sort="none"><button type="button" class="market-sort-button" data-batch-sort="score">Funding Score <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                  <th scope="col" class="num" aria-sort="none"><button type="button" class="market-sort-button" data-batch-sort="funding">Avg / Hour <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                  <th scope="col" class="num" aria-sort="none"><button type="button" class="market-sort-button" data-batch-sort="apr">Avg APR <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                  <th scope="col" class="num" aria-sort="none"><button type="button" class="market-sort-button" data-batch-sort="volatility">Volatility (SD) <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
+                  <th scope="col" class="num" aria-sort="none"><button type="button" class="market-sort-button" data-batch-sort="consistency">Direction Hit Rate <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
                   <th class="num">Pos / Neg</th>
-                  <th class="num">Coverage</th>
+                  <th scope="col" class="num" aria-sort="none"><button type="button" class="market-sort-button" data-batch-sort="coverage">Coverage <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
                   <th>Analysis</th>
                 </tr>
               </thead>
@@ -458,17 +449,8 @@
           </div>
 
           <div class="symbol-analysis-body">
-            <p class="analysis-note">Historical funding samples only. APR is the arithmetic mean hourly rate × 8,760, annualized for comparison. The orange line sums hourly rates from the first available sample. These figures do not include position direction, fees, price P&amp;L, or compounding.</p>
-            <div class="symbol-summary-grid" id="symbolSummaryGrid">
-              <article class="stat-box"><span class="stat-label">Avg Funding / Hr</span><strong id="symbolAvgFunding">--</strong></article>
-              <article class="stat-box"><span class="stat-label">Avg APR Est.</span><strong id="symbolAvgApr">--</strong></article>
-              <article class="stat-box"><span class="stat-label">Volatility (SD)</span><strong id="symbolVolatility">--</strong></article>
-              <article class="stat-box"><span class="stat-label">Funding Score</span><strong id="symbolScore">--</strong></article>
-              <article class="stat-box"><span class="stat-label">Direction Hit Rate</span><strong id="symbolHitRate">--</strong></article>
-              <article class="stat-box"><span class="stat-label">Positive / Negative</span><strong id="symbolDirectionCount">--</strong></article>
-              <article class="stat-box"><span class="stat-label">Samples</span><strong id="symbolSampleCount">--</strong></article>
-              <article class="stat-box"><span class="stat-label">Available Span</span><strong id="symbolAvailableSpan">--</strong></article>
-            </div>
+            <div class="method-inline"><span>Historical funding rates · signed annualization · no trading P&amp;L</span><details><summary>Calculation method</summary><p class="analysis-note">Historical funding samples only. APR is the arithmetic mean hourly rate × 8,760, annualized for comparison. The orange line sums hourly rates from the first available sample. These figures do not include position direction, fees, price P&amp;L, or compounding.</p></details></div>
+            <div class="symbol-summary-grid" id="symbolSummaryGrid"><article class="stat-box"><span class="stat-label">Avg Funding / Hr</span><strong id="symbolAvgFunding">--</strong></article><article class="stat-box"><span class="stat-label">Avg APR Est.</span><strong id="symbolAvgApr">--</strong></article><article class="stat-box"><span class="stat-label">Volatility (SD)</span><strong id="symbolVolatility">--</strong></article><article class="stat-box"><span class="stat-label">Direction Hit Rate</span><strong id="symbolHitRate">--</strong></article></div><div class="symbol-data-strip"><article class="stat-box"><span class="stat-label">Funding Score</span><strong id="symbolScore">--</strong></article><article class="stat-box"><span class="stat-label">Positive / Negative</span><strong id="symbolDirectionCount">--</strong></article><article class="stat-box"><span class="stat-label">Samples</span><strong id="symbolSampleCount">--</strong></article><article class="stat-box"><span class="stat-label">Available Span</span><strong id="symbolAvailableSpan">--</strong></article></div>
             <div class="symbol-chart-heading">
               <div><h3>Funding and Cumulative Rate</h3><p id="symbolChartRange">--</p></div>
               <div class="symbol-chart-legend"><span class="legend-rate">Funding / Hr</span><span class="legend-cumulative">Cumulative Funding</span></div>
@@ -497,54 +479,39 @@
             </div>
             <button class="text-button primary-btn" id="simRunButton" type="button">Refresh &amp; Simulate</button>
           </div>
-          <div class="symbol-analysis-body">
-            <p class="analysis-note">Any mapped crypto or stock spot / perp candidate with both current midpoint prices can be simulated, regardless of volume or order-book depth. Ticker-only matches may represent different assets or units. Historical funding rates are observed; entry uses current midpoints and exit uses a selected hypothetical gap. Neither is an executable fill or a historical trade.</p>
-            <div class="sim-workspace">
-              <section class="sim-workspace-section" aria-label="Scenario controls">
+          <div class="symbol-analysis-body simulator-body">
+            <div class="scenario-scope">Long spot / short perp · current midpoint entry · hypothetical exit · historical funding replay</div>
+            <div class="sim-layout"><aside class="sim-controls"><section class="sim-workspace-section" aria-label="Scenario controls">
                 <div class="symbol-table-heading"><div><h3>Scenario controls</h3><p>Choose a pair, funding window, trade size and hypothetical exit.</p></div></div>
                 <div class="sim-input-grid">
               <label class="select-field"><span>Asset category</span><select id="simAssetType"><option value="all">All assets</option><option value="crypto">Crypto</option><option value="stocks">Stocks</option><option value="indices">Indices</option><option value="commodities">Commodities</option><option value="fx">FX</option><option value="preipo">Pre-IPO</option><option value="other">Other / unknown</option></select></label>
               <label class="select-field"><span>Spot / perp pair</span><select id="simPair"><option value="">Loading pairs...</option></select></label>
               <label class="select-field"><span>History window</span><select id="simWindow"><option value="7">7d</option><option value="14">14d</option><option value="30">30d</option><option value="60">60d</option><option value="90">90d</option><option value="180">180d</option><option value="365">1y</option></select></label>
               <label class="number-field"><span>Initial capital (USDC)</span><input id="simCapital" type="number" min="100" step="100" value="10000" /></label>
-              <label class="number-field"><span>Spot taker fee (%)</span><input id="simSpotFee" type="number" min="0" max="10" step="0.001" value="0.07" /></label>
-              <label class="number-field"><span>Perp taker fee (%)</span><input id="simPerpFee" type="number" min="0" max="10" step="0.001" value="0.045" /></label>
+
+
                   <label class="select-field"><span>Exit basis scenario</span><select id="simExitScenario"><option value="unchanged">Current gap unchanged</option><option value="converged">Gap converges to zero</option><option value="custom">Custom exit gap</option></select></label>
                   <label class="number-field"><span>Target perp − spot (%)</span><input id="simExitBasis" type="number" min="-99.9" max="1000" step="0.01" value="0" disabled /></label>
                 </div>
-                <p class="sim-source-note">The exit scenario holds the spot midpoint fixed and changes the perp midpoint to the target gap. It is a hypothetical close, not a forecast.</p>
-              </section>
-              <section class="sim-workspace-section" aria-label="Crypto and stock pair candidates">
-                <div class="symbol-table-heading"><div><h3>Crypto &amp; Stock Pair Candidates</h3><p>Select a row to inspect its quotes and run the scenario.</p></div></div>
-                <div class="table-scroll sim-pair-scroll">
-              <table class="analysis-table">
-                <thead><tr><th>Pair</th><th class="num">Spot mid</th><th class="num">Perp mid</th><th class="num">Perp − spot</th><th class="num">Spot 24h vol</th><th>Action</th></tr></thead>
-                <tbody id="simPairRows"><tr><td colspan="6" class="empty-cell">Load markets to see eligible pairs</td></tr></tbody>
-              </table>
-                </div>
-                <p class="sim-source-note" id="simPairStatus">Mapped crypto and stock pairs load from current Hyperliquid spot, native perpetual and XYZ markets. Markets without mapped spot legs remain available in funding analysis.</p>
-              </section>
+                <details class="advanced-fees"><summary>Advanced · taker fees</summary><div class="sim-input-grid"><label class="number-field"><span>Spot taker fee (%)</span><input id="simSpotFee" type="number" min="0" max="10" step="0.001" value="0.07" /></label><label class="number-field"><span>Perp taker fee (%)</span><input id="simPerpFee" type="number" min="0" max="10" step="0.001" value="0.045" /></label></div></details><p class="sim-source-note">The exit scenario holds the spot midpoint fixed and changes the perp midpoint to the target gap. It is a hypothetical close, not a forecast.</p>
+              </section></aside><div class="sim-output">
+              <div class="sim-results-heading"><p class="eyebrow">RESULTS · HYPOTHETICAL CLOSE</p><h3>Scenario results</h3></div>
+              <div class="sim-primary-results"><article class="stat-box sim-net"><span class="stat-label">Modeled net P&amp;L</span><strong id="simNet">--</strong></article><article class="stat-box"><span class="stat-label">Return on initial capital</span><strong id="simReturn">--</strong></article><article class="stat-box"><span class="stat-label">Modeled net APR · simple annualization</span><strong id="simApr">--</strong><span class="stat-desc">Annualized return on initial capital</span></article></div><p class="sim-source-note" id="simCoverage">Coverage: --</p><p class="sim-source-note" id="simBasisComparison">Basis scenario comparison: --</p><div class="symbol-chart-heading">
+              <div><h3>Funding and Modeled Net P&amp;L</h3><p id="simChartRange">--</p></div>
+              <div class="symbol-chart-legend"><span class="legend-rate">Funding / Hr</span><span class="legend-cumulative">Cumulative Funding</span><span class="legend-profit">Funding less entry fees</span><span class="legend-exit">Scenario close</span></div>
             </div>
-            <div class="sim-results-heading"><p class="eyebrow">RESULTS · HYPOTHETICAL CLOSE</p><h3>Scenario results</h3></div>
-            <p class="sim-source-note">Fees are editable estimates; verify your account's spot and perp fees, including any deployer surcharge. Half the capital is reserved for spot and half for 1× perp margin. The model ignores liquidity, bid/ask spread, slippage, borrowing, leverage, reinvestment, other future price moves and liquidation.</p>
-            <div class="sim-price-grid">
+            <p class="sim-event-summary" id="simEventSummary">Opening and closing costs: --</p>
+            <div class="symbol-chart-container"><canvas id="simChart" aria-label="Hourly funding and a P&L line with separate entry-fee and hypothetical exit-cost events" role="img"></canvas></div>
+            <p class="sim-source-note">The purple line drops when modeled entry fees are paid, then tracks observed funding less entry fees. The final outlined point applies the selected hypothetical exit fees and basis P&amp;L immediately after the last sample. Entry and exit prices use current midpoints and an assumed exit gap; the chart does not reconstruct historical trades. Bid/ask spread and slippage are excluded.</p>
+              <h3 class="section-label">Funding, costs &amp; basis</h3><div class="sim-breakdown"><article class="stat-box"><span class="stat-label">Historical funding replay · short perp</span><strong id="simFunding">--</strong></article><article class="stat-box"><span class="stat-label">Entry fees</span><strong id="simEntryFees">--</strong></article><article class="stat-box"><span class="stat-label">Exit fees</span><strong id="simExitFees">--</strong></article><article class="stat-box"><span class="stat-label">Exit basis · perp − spot</span><strong id="simExitBasisDisplay">--</strong></article><article class="stat-box"><span class="stat-label">Basis change P&amp;L</span><strong id="simPricePnl">--</strong></article></div>
+              <details class="workspace-disclosure"><summary>Quotes &amp; matched position</summary><div class="sim-price-grid">
               <article class="stat-box"><span class="stat-label">Spot midpoint</span><strong id="simSpotQuote">--</strong></article>
               <article class="stat-box"><span class="stat-label">Perp midpoint</span><strong id="simPerpQuote">--</strong></article>
               <article class="stat-box"><span class="stat-label">Spot / perp midpoint basis</span><strong id="simBasis">--</strong></article>
               <article class="stat-box"><span class="stat-label">Matched position</span><strong id="simPosition">--</strong></article>
             </div>
-            <p class="sim-source-note" id="simSnapshot">Quotes: --</p>
-            <div class="sim-result-grid">
-              <article class="stat-box"><span class="stat-label">Historical funding replay · short perp</span><strong id="simFunding">--</strong></article>
-              <article class="stat-box"><span class="stat-label">Entry fees</span><strong id="simEntryFees">--</strong></article>
-              <article class="stat-box"><span class="stat-label">Exit fees</span><strong id="simExitFees">--</strong></article>
-              <article class="stat-box"><span class="stat-label">Exit basis · perp − spot</span><strong id="simExitBasisDisplay">--</strong></article>
-              <article class="stat-box"><span class="stat-label">Basis change P&amp;L</span><strong id="simPricePnl">--</strong></article>
-              <article class="stat-box sim-net"><span class="stat-label">Modeled net P&amp;L</span><strong id="simNet">--</strong></article>
-              <article class="stat-box"><span class="stat-label">Return on initial capital</span><strong id="simReturn">--</strong></article>
-              <article class="stat-box"><span class="stat-label">Modeled net APR · simple annualization</span><strong id="simApr">--</strong><span class="stat-desc">Annualized return on initial capital</span></article>
-            </div>
-            <p class="sim-source-note" id="simAprDetails">APR calculation: --</p>
+            <p class="sim-source-note" id="simSnapshot">Quotes: --</p></details>
+              <details class="workspace-disclosure"><summary>Calculation details &amp; assumptions</summary><p class="analysis-note">Any mapped crypto or stock spot / perp candidate with both current midpoint prices can be simulated, regardless of volume or order-book depth. Ticker-only matches may represent different assets or units. Historical funding rates are observed; entry uses current midpoints and exit uses a selected hypothetical gap. Neither is an executable fill or a historical trade.</p><p class="sim-source-note">Fees are editable account estimates. Half the capital is reserved for spot and half for 1× perp margin. Liquidity, bid/ask spread, slippage, borrowing, leverage, reinvestment, other future price moves and liquidation are excluded.</p><p class="sim-source-note" id="simAprDetails">APR calculation: --</p>
             <section class="sim-calculations" aria-label="Fee and basis calculation details">
               <div class="symbol-table-heading"><div><h3>Fee &amp; basis details</h3><p>Calculations use the matched quantity and your selected fee rates and exit scenario.</p></div></div>
               <div class="sim-detail-grid">
@@ -554,21 +521,23 @@
               </div>
               <p class="sim-source-note">Each fee = matched quantity × that leg's price × fee rate. Percentage inputs are divided by 100 (e.g. 0.07% = 0.0007). The perp rate is the total rate you enter; include any applicable deployer surcharge in it. No separate surcharge is calculated. Funding is shown separately; spread, slippage, borrowing and liquidation costs are excluded. Displayed amounts are rounded; totals use unrounded values.</p>
               <p class="sim-event-summary" id="simPnlDetails">P&amp;L calculation: --</p>
-            </section>
-            <p class="sim-source-note" id="simBasisComparison">Basis scenario comparison: --</p>
-            <p class="sim-source-note" id="simCoverage">Coverage: --</p>
-            <div class="symbol-chart-heading">
-              <div><h3>Funding and Modeled Net P&amp;L</h3><p id="simChartRange">--</p></div>
-              <div class="symbol-chart-legend"><span class="legend-rate">Funding / Hr</span><span class="legend-cumulative">Cumulative Funding</span><span class="legend-profit">Funding less entry fees</span><span class="legend-exit">Scenario close</span></div>
-            </div>
-            <p class="sim-event-summary" id="simEventSummary">Opening and closing costs: --</p>
-            <div class="symbol-chart-container"><canvas id="simChart" aria-label="Hourly funding and a P&L line with separate entry-fee and hypothetical exit-cost events" role="img"></canvas></div>
-            <p class="sim-source-note">The purple line drops when modeled entry fees are paid, then tracks observed funding less entry fees. The final outlined point applies the selected hypothetical exit fees and basis P&amp;L immediately after the last sample. Entry and exit prices use current midpoints and an assumed exit gap; the chart does not reconstruct historical trades. Bid/ask spread and slippage are excluded.</p>
+            </section></details>
+            </div></div>
+            <details class="workspace-disclosure pair-disclosure"><summary>Browse crypto &amp; stock pair candidates</summary><section class="sim-workspace-section" aria-label="Crypto and stock pair candidates">
+                <div class="symbol-table-heading"><div><h3>Crypto &amp; Stock Pair Candidates</h3><p>Select a row to inspect its quotes and run the scenario.</p></div></div>
+                <div class="table-scroll sim-pair-scroll">
+              <table class="analysis-table">
+                <thead><tr><th>Pair</th><th class="num">Spot mid</th><th class="num">Perp mid</th><th class="num">Perp − spot</th><th class="num">Spot 24h vol</th><th>Action</th></tr></thead>
+                <tbody id="simPairRows"><tr><td colspan="6" class="empty-cell">Load markets to see eligible pairs</td></tr></tbody>
+              </table>
+                </div>
+                <p class="sim-source-note" id="simPairStatus">Mapped crypto and stock pairs load from current Hyperliquid spot, native perpetual and XYZ markets. Markets without mapped spot legs remain available in funding analysis.</p>
+              </section></details>
           </div>
         </section>
       </div>
     </main>
 
-    <script src="./app.js?v=20260930-crypto-markets"></script>
+    <script src="./app.js?v=20260930-workspace-design-2"></script>
   </body>
 </html>

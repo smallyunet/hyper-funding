@@ -74,6 +74,7 @@ const state = {
   assetType: "all",
   direction: "all",
   sort: "funding-desc",
+  analysisSort: "score-desc",
   search: "",
   minVolume: 0,
   minOi: 0,
@@ -113,8 +114,9 @@ const elements = {
   lowestSymbol: document.getElementById("lowestSymbol"),
   directionSplit: document.getElementById("directionSplit"),
   searchInput: document.getElementById("searchInput"),
-  assetTypeSelects: ["assetTypeSelect", "symbolAssetType", "simAssetType"].map((id) => document.getElementById(id)),
-  sortSelect: document.getElementById("sortSelect"),
+  assetTypeSelects: ["assetTypeSelect", "batchAssetType", "symbolAssetType", "simAssetType"].map((id) => document.getElementById(id)),
+  marketSortButtons: [...document.querySelectorAll("[data-market-sort]")],
+  batchSortButtons: [...document.querySelectorAll("[data-batch-sort]")],
   minVolumeInput: document.getElementById("minVolumeInput"),
   minOiInput: document.getElementById("minOiInput"),
   fundingRows: document.getElementById("fundingRows"),
@@ -250,7 +252,10 @@ function render() {
   const rows = applyFiltersAndSort();
   state.filteredRows = rows;
   renderMetrics(rows);
+  document.getElementById("workspaceScope").textContent = `${categoryLabel(state.assetType)} · ${rows.length} markets`;
+  document.getElementById("workspaceFreshness").textContent = elements.updatedAt.textContent;
   renderTable(rows);
+  renderMarketSortHeaders();
   renderAnalysis();
   renderSymbolOptions();
   elements.analyzeTopButton.disabled = state.analyzing || state.marketStale || !rows.length;
@@ -296,10 +301,13 @@ function applyFiltersAndSort() {
     volume: "volume",
     oi: "openInterest",
     basis: "basis",
+    price: "mark",
+    leverage: "maxLeverage",
   };
   const key = fieldMap[field] ?? "funding";
 
   return rows.sort((a, b) => {
+    if (field === "symbol") return a.displaySymbol.localeCompare(b.displaySymbol) * directionFactor || a.symbol.localeCompare(b.symbol);
     const aValid = Number.isFinite(a[key]);
     const bValid = Number.isFinite(b[key]);
     if (aValid !== bValid) return aValid ? -1 : 1;
@@ -321,7 +329,11 @@ function renderMetrics(rows) {
     : "--";
   elements.highestFunding.textContent = highest ? `${highest.funding >= 0 ? '+' : ''}${formatPercent(highest.funding)}` : "--";
   elements.highestSymbol.textContent = highest?.displaySymbol ?? "--";
-  elements.lowestFunding.textContent = lowest ? formatPercent(lowest.funding) : "--";
+  elements.lowestFunding.textContent = lowest ? signedPercent(lowest.funding) : "--";
+  elements.highestFunding.classList.toggle("positive", highest?.funding >= 0);
+  elements.highestFunding.classList.toggle("negative", highest?.funding < 0);
+  elements.lowestFunding.classList.toggle("positive", lowest?.funding >= 0);
+  elements.lowestFunding.classList.toggle("negative", lowest?.funding < 0);
   elements.lowestSymbol.textContent = lowest?.displaySymbol ?? "--";
   elements.directionSplit.textContent = rows.length ? `${positiveCount} / ${negativeCount}` : "--";
 }
@@ -342,7 +354,7 @@ function renderTable(rows) {
         <tr data-symbol="${escapeHtml(row.symbol)}" class="${isActive}">
           <td>
             <div class="symbol-cell">
-              <span class="symbol-chip">${escapeHtml(categoryLabel(row.category || marketCategory(row.symbol)))}</span>
+              <span class="symbol-chip" data-category="${escapeHtml(row.category || marketCategory(row.symbol))}">${escapeHtml(categoryLabel(row.category || marketCategory(row.symbol)))}</span>
               <span>${escapeHtml(row.displaySymbol)}</span>
               <button class="row-analysis-button compact-analyze" type="button" data-analyze-symbol="${escapeHtml(row.symbol)}" aria-label="Analyze ${escapeHtml(row.displaySymbol)}">Analyze →</button>
             </div>
@@ -365,10 +377,29 @@ function renderError(message) {
   elements.fundingRows.innerHTML = `<tr><td colspan="9" class="empty-cell">${escapeHtml(message)}</td></tr>`;
 }
 
+const BATCH_SORT_FIELDS = { symbol: "displaySymbol", score: "score", funding: "avgFunding", apr: "avgApr", volatility: "volatility", consistency: "directionHitRate", coverage: "samples" };
+function sortAnalysisRows(rows) {
+  const [field, direction] = state.analysisSort.split("-");
+  const key = BATCH_SORT_FIELDS[field] || "score";
+  const factor = direction === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => Number(b.complete) - Number(a.complete) ||
+    (field === "symbol" ? a.displaySymbol.localeCompare(b.displaySymbol) : a[key] - b[key]) * factor || a.symbol.localeCompare(b.symbol));
+}
+function renderBatchSortHeaders() {
+  const [field, direction] = state.analysisSort.split("-");
+  elements.batchSortButtons.forEach((button) => {
+    const active = button.dataset.batchSort === field;
+    button.closest("th").setAttribute("aria-sort", active ? direction === "asc" ? "ascending" : "descending" : "none");
+    button.querySelector(".sort-indicator").textContent = active ? direction === "asc" ? "↑" : "↓" : "↕";
+    button.classList.toggle("sort-active", active);
+  });
+}
+
 function renderAnalysis() {
-  const rows = [...state.analysisRows].sort((a, b) => Number(b.complete) - Number(a.complete) || b.score - a.score);
+  const rows = sortAnalysisRows(state.analysisRows);
+  renderBatchSortHeaders();
   const ranked = rows.filter((row) => row.complete);
-  const bestScore = ranked[0];
+  const bestScore = [...ranked].sort((a, b) => b.score - a.score)[0];
   const bestApr = [...ranked].filter((row) => row.avgApr > 0).sort((a, b) => b.avgApr - a.avgApr)[0];
 
   elements.analyzedCount.textContent = rows.length ? rows.length.toString() : "--";
@@ -378,7 +409,7 @@ function renderAnalysis() {
   elements.bestAvgAprSymbol.textContent = bestApr?.displaySymbol ?? "--";
 
   if (!rows.length) {
-    elements.analysisRows.innerHTML = `<tr><td colspan="9" class="empty-cell">Run history analysis from the controls above or a table row</td></tr>`;
+    elements.analysisRows.innerHTML = state.analyzing ? Array.from({length: 5}, () => `<tr class="skeleton-row" aria-hidden="true">${Array.from({length: 9}, () => '<td><span class="skeleton"></span></td>').join("")}</tr>`).join("") : `<tr><td colspan="9" class="empty-cell">Choose a window and select Analyze to compare historical funding.</td></tr>`;
     return;
   }
 
@@ -389,18 +420,18 @@ function renderAnalysis() {
         <tr data-symbol="${escapeHtml(row.symbol)}">
           <td>
             <div class="symbol-cell">
-              <span class="symbol-chip">${escapeHtml(categoryLabel(row.category || marketCategory(row.symbol)))}</span>
+              <span class="symbol-chip" data-category="${escapeHtml(row.category || marketCategory(row.symbol))}">${escapeHtml(categoryLabel(row.category || marketCategory(row.symbol)))}</span>
               <span>${escapeHtml(row.displaySymbol)}</span>
               <button class="row-analysis-button compact-analyze" type="button" data-analyze-symbol="${escapeHtml(row.symbol)}" aria-label="Analyze ${escapeHtml(row.displaySymbol)}">Analyze →</button>
             </div>
           </td>
-          <td class="num"><strong style="color: var(--text-primary);">${row.complete ? row.score.toFixed(1) : "--"}</strong></td>
+          <td class="num"><div class="score-cell"><strong>${row.complete ? row.score.toFixed(1) : "--"}</strong><span class="score-track"><span style="width:${row.complete ? Math.max(0, Math.min(100, row.score)) : 0}%"></span></span></div></td>
           <td class="num ${tone}">${row.avgFunding >= 0 ? '+' : ''}${formatPercent(row.avgFunding)}</td>
           <td class="num ${tone}">${row.avgApr >= 0 ? '+' : ''}${formatPercent(row.avgApr)}</td>
           <td class="num">${formatPercent(row.volatility)}</td>
           <td class="num">${formatPercent(row.directionHitRate)}</td>
           <td class="num">${row.positiveCount} / ${row.negativeCount}</td>
-          <td class="num" title="${row.samples} of ${row.expectedSamples} expected hourly samples">${row.samples} / ${row.expectedSamples} (${row.complete ? "complete" : "partial"})</td>
+          <td class="num" title="${row.samples} of ${row.expectedSamples} expected hourly samples"><span class="coverage-badge ${row.complete ? "complete" : "partial"}">${row.complete ? "Complete" : "Partial"}</span><span class="coverage-count">${row.samples} / ${row.expectedSamples}</span></td>
           <td><button class="row-analysis-button" type="button" data-analyze-symbol="${escapeHtml(row.symbol)}" aria-label="Analyze ${escapeHtml(row.displaySymbol)}">Analyze →</button></td>
         </tr>
       `;
@@ -427,6 +458,7 @@ async function selectSymbol(symbol, isManual = false) {
   // Render main details card header
   document.getElementById("detailSymbolName").textContent = row.displaySymbol;
   document.getElementById("detailAssetBadge").textContent = categoryLabel(row.category);
+  document.getElementById("detailAssetBadge").setAttribute("data-category", row.category);
   document.getElementById("detailLeverageText").textContent = `Max Leverage: ${row.maxLeverage ? row.maxLeverage + 'x' : '--'}`;
   
   // Live Metrics updates
@@ -666,9 +698,8 @@ function updateChart(labels, data, avgFundingRate) {
     state.chartInstance.destroy();
   }
   
-  const isPositive = avgFundingRate >= 0;
-  const color = isPositive ? "#10b981" : "#ef4444";
-  const gradientColor = isPositive ? "rgba(16, 185, 129, 0.15)" : "rgba(239, 68, 68, 0.15)";
+  const color = "#60a5fa";
+  const gradientColor = "rgba(96, 165, 250, 0.12)";
   
   const gradient = ctx.createLinearGradient(0, 0, 0, 180);
   gradient.addColorStop(0, gradientColor);
@@ -746,6 +777,7 @@ function updateChart(labels, data, avgFundingRate) {
 // Swaps the tab view
 function switchTab(viewId) {
   state.activeView = viewId;
+  document.body?.setAttribute("data-active-view", viewId);
   for (const [tab, view] of [
     [elements.tabMarkets, elements.viewMarketBoard],
     [elements.tabAnalytics, elements.viewBatchAnalytics],
@@ -791,7 +823,9 @@ function resetSymbolAnalysis() {
   for (const id of ["symbolAvgFunding", "symbolAvgApr", "symbolVolatility", "symbolScore",
     "symbolHitRate", "symbolDirectionCount", "symbolSampleCount", "symbolAvailableSpan"]) {
     document.getElementById(id).textContent = "--";
+    document.getElementById(id).classList.remove("positive", "negative");
   }
+  elements.symbolAnalysisStatus.setAttribute("data-coverage", "pending");
   document.getElementById("symbolChartRange").textContent = "--";
   state.symbolAnalysisPoints = [];
   state.symbolAnalysisPage = 0;
@@ -822,9 +856,14 @@ async function analyzeSelectedSymbol() {
     state.symbolAnalysisPoints = points;
     const coverage = getHistoryCoverage(stats, days);
     const available = formatSampleDays(coverage.spanHours / 24);
+    elements.symbolAnalysisStatus.setAttribute("data-coverage", coverage.complete ? "complete" : "partial");
     elements.symbolAnalysisStatus.textContent = `${coverage.complete ? "Complete" : "Partial"} · ${stats.samples}/${coverage.expectedSamples} hourly samples · ${available} span · as of ${formatUtc(history.fetchedAt)} UTC`;
     document.getElementById("symbolAvgFunding").textContent = signedPercent(stats.avgFunding);
     document.getElementById("symbolAvgApr").textContent = signedPercent(stats.avgApr);
+    for (const id of ["symbolAvgFunding", "symbolAvgApr"]) {
+      document.getElementById(id).classList.toggle("positive", stats.avgFunding >= 0);
+      document.getElementById(id).classList.toggle("negative", stats.avgFunding < 0);
+    }
     document.getElementById("symbolVolatility").textContent = formatPercent(stats.volatility);
     document.getElementById("symbolScore").textContent = coverage.complete ? stats.score.toFixed(1) : "--";
     document.getElementById("symbolHitRate").textContent = formatPercent(stats.directionHitRate);
@@ -865,7 +904,7 @@ function renderSymbolChart(points) {
     data: {
       labels,
       datasets: [
-        { label: "Funding / Hr", data: points.map((point) => point.rate * 100), yAxisID: "rate", borderColor: "#10b981", backgroundColor: "#10b981", borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 3, tension: 0 },
+        { label: "Funding / Hr", data: points.map((point) => point.rate * 100), yAxisID: "rate", borderColor: "#60a5fa", backgroundColor: "#60a5fa", borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 3, tension: 0 },
         { label: "Cumulative Funding", data: points.map((point) => point.cumulativeRate * 100), yAxisID: "cumulative", borderColor: "#f59e0b", backgroundColor: "#f59e0b", borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 3, tension: 0 },
       ],
     },
@@ -880,7 +919,7 @@ function renderSymbolChart(points) {
       },
       scales: {
         x: { ticks: { color: "#94a3b8", maxTicksLimit: 8 }, grid: { display: false } },
-        rate: { type: "linear", position: "left", title: { display: true, text: "Funding / Hr (%)", color: "#10b981" }, ticks: { color: "#10b981", callback: (value) => `${Number(value).toFixed(4)}%` }, grid: { color: "rgba(148,163,184,.12)" } },
+        rate: { type: "linear", position: "left", title: { display: true, text: "Funding / Hr (%)", color: "#60a5fa" }, ticks: { color: "#60a5fa", callback: (value) => `${Number(value).toFixed(4)}%` }, grid: { color: "rgba(148,163,184,.12)" } },
         cumulative: { type: "linear", position: "right", title: { display: true, text: "Cumulative Funding (%)", color: "#f59e0b" }, ticks: { color: "#f59e0b", callback: (value) => `${Number(value).toFixed(2)}%` }, grid: { drawOnChartArea: false } },
       },
     },
@@ -942,7 +981,7 @@ function renderSimulatorPairList(pairs, selected) {
   elements.simPairRows.innerHTML = pairs.length ? pairs.map((pair) => `
     <tr class="sim-pair-row ${pair.spotCoin === selected ? "selected" : ""}">
       <td>
-        <span class="symbol-chip">${escapeHtml(categoryLabel(pair.category))}</span> <strong>${escapeHtml(pair.label)}</strong> <span class="stat-desc">${escapeHtml(pair.spotToken)}/USDC ↔ ${escapeHtml(pair.perp)}</span>
+        <span class="symbol-chip" data-category="${escapeHtml(pair.category)}">${escapeHtml(categoryLabel(pair.category))}</span> <strong>${escapeHtml(pair.label)}</strong> <span class="stat-desc">${escapeHtml(pair.spotToken)}/USDC ↔ ${escapeHtml(pair.perp)}</span>
         <div class="sim-pair-links">
           <a href="https://app.hyperliquid.xyz/trade/${encodeURIComponent(pair.spotToken)}/USDC" target="_blank" rel="noopener noreferrer" aria-label="Open ${escapeHtml(pair.spotToken)}/USDC spot on Hyperliquid">Spot ↗</a>
           <a href="https://app.hyperliquid.xyz/trade/${encodeURIComponent(pair.perp)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${escapeHtml(pair.perp)} perpetual on Hyperliquid">Perp ↗</a>
@@ -1038,7 +1077,8 @@ function renderSimulatorCalculationDetails(result, market, spotFee, perpFee, sce
 
 function resetSimulator() {
   for (const id of ["simSpotQuote", "simPerpQuote", "simBasis", "simPosition", "simFunding",
-    "simEntryFees", "simExitFees", "simExitBasisDisplay", "simPricePnl", "simNet", "simReturn", "simApr"]) document.getElementById(id).textContent = "--";
+    "simEntryFees", "simExitFees", "simExitBasisDisplay", "simPricePnl", "simNet", "simReturn", "simApr"]) { document.getElementById(id).textContent = "--"; document.getElementById(id).classList.remove("positive", "negative"); }
+  document.getElementById("simCoverage").classList.remove("partial");
   document.getElementById("simAprDetails").textContent = "APR calculation: --";
   document.getElementById("simSnapshot").textContent = "Quotes: --";
   document.getElementById("simBasisComparison").textContent = "Basis scenario comparison: --";
@@ -1133,6 +1173,7 @@ function renderSimulator() {
   const simComplete = coverage.samples >= coverage.expectedSamples && coverage.missingSamples === 0 &&
     Date.now() - stats.lastSampleTime <= 2 * FUNDING_HISTORY_STEP_MS;
   const set = (id, value) => { document.getElementById(id).textContent = value; };
+  document.getElementById("simCoverage").classList.toggle("partial", !simComplete);
   set("simSpotQuote", formatNumber(market.spotMid, 5));
   set("simPerpQuote", formatNumber(market.perpMid, 5));
   set("simBasis", signedPercent((market.perpMid - market.spotMid) / market.spotMid));
@@ -1144,6 +1185,11 @@ function renderSimulator() {
   set("simPricePnl", formatSignedMoney(result.pricePnl));
   set("simNet", formatSignedMoney(result.netUsd));
   set("simReturn", signedPercent(result.returnRate));
+  for (const [id, value] of [["simNet", result.netUsd], ["simReturn", result.returnRate], ["simFunding", result.fundingUsd], ["simPricePnl", result.pricePnl]]) {
+    const element = document.getElementById(id);
+    element.classList.toggle("positive", value >= 0);
+    element.classList.toggle("negative", value < 0);
+  }
   const annualized = annualizeScenarioReturn(result.returnRate, stats.firstSampleTime, stats.lastSampleTime);
   set("simApr", Number.isFinite(annualized.apr) ? signedPercent(annualized.apr) : "--");
   set("simAprDetails", Number.isFinite(annualized.apr) ?
@@ -1190,7 +1236,7 @@ function renderSimulatorChart(result) {
     data: {
       labels: timeline.map((point) => point.label),
       datasets: [
-        { label: "Funding / Hr", data: timeline.map((point) => point.rate === null ? null : point.rate * 100), yAxisID: "rate", borderColor: "#10b981", borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 3, tension: 0 },
+        { label: "Funding / Hr", data: timeline.map((point) => point.rate === null ? null : point.rate * 100), yAxisID: "rate", borderColor: "#60a5fa", borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 3, tension: 0 },
         { label: "Cumulative Funding", data: timeline.map((point) => point.cumulativeRate * 100), yAxisID: "cumulative", borderColor: "#f59e0b", borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 3, tension: 0 },
         { label: "Funding less entry fees / scenario close", data: timeline.map((point) => point.pnlUsd), yAxisID: "profit", borderColor: "#a78bfa", borderWidth: 2.5,
           pointRadius: (context) => [1, timeline.length - 1].includes(context.dataIndex) ? 6 : 0,
@@ -1213,7 +1259,7 @@ function renderSimulatorChart(result) {
         [`Exit fees: ${formatSignedMoney(-result.exitFees)}`, `Basis P&L: ${formatSignedMoney(result.pricePnl)}`] : [] } } },
       scales: {
         x: { ticks: { color: "#94a3b8", maxTicksLimit: 7 }, grid: { display: false } },
-        rate: { position: "left", title: { display: true, text: "Funding / Hr (%)", color: "#10b981" }, ticks: { color: "#10b981", callback: (value) => `${Number(value).toFixed(4)}%` }, grid: { color: "rgba(148,163,184,.12)" } },
+        rate: { position: "left", title: { display: true, text: "Funding / Hr (%)", color: "#60a5fa" }, ticks: { color: "#60a5fa", callback: (value) => `${Number(value).toFixed(4)}%` }, grid: { color: "rgba(148,163,184,.12)" } },
         cumulative: { position: "right", title: { display: true, text: "Cumulative (%)", color: "#f59e0b" }, ticks: { color: "#f59e0b", callback: (value) => `${Number(value).toFixed(2)}%` }, grid: { drawOnChartArea: false } },
         profit: { position: "right", title: { display: true, text: "Net P&L (USD)", color: "#a78bfa" }, ticks: { color: "#a78bfa", callback: (value) => formatMoney(Number(value)) }, grid: { drawOnChartArea: false } },
       },
@@ -1223,7 +1269,7 @@ function renderSimulatorChart(result) {
 
 function renderSymbolHistoryTable() {
   const points = state.symbolAnalysisPoints;
-  const pageSize = 100;
+  const pageSize = 50;
   const pages = Math.ceil(points.length / pageSize);
   state.symbolAnalysisPage = Math.min(state.symbolAnalysisPage, Math.max(0, pages - 1));
   const start = state.symbolAnalysisPage * pageSize;
@@ -1283,8 +1329,8 @@ async function analyzeSymbols(symbols, skippedCount = 0) {
   const controller = new AbortController();
   state.batchAbortController = controller;
   state.analysisRows = [];
-  renderAnalysis();
   state.analyzing = true;
+  renderAnalysis();
   elements.analyzeTopButton.disabled = true;
   elements.cancelAnalysisButton.disabled = false;
   setAnalysisStatus(`Analyzing 0 / ${uniqueSymbols.length}`);
@@ -1334,6 +1380,8 @@ async function analyzeSymbols(symbols, skippedCount = 0) {
       );
       if (requestId !== state.batchRequest) return;
       results.push(...batchResults);
+      state.analysisRows = results.filter(Boolean);
+      renderAnalysis();
     }
 
     const validResults = results.filter(Boolean);
@@ -1623,16 +1671,29 @@ function formatMode(value) {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+const MARKET_SORT_LABELS = { symbol: "Symbol", funding: "Funding", apr: "Est. APR", price: "Price", basis: "Basis", oi: "Open Interest", volume: "24h Volume", leverage: "Max Leverage" };
 function getSortLabel(sortValue) {
-  const sortMap = {
-    "funding-desc": "Funding (H → L)",
-    "funding-asc": "Funding (L → H)",
-    "apr-desc": "Est. APR (H → L)",
-    "volume-desc": "24h Vol (H → L)",
-    "oi-desc": "Open Interest (H → L)",
-    "basis-desc": "Basis (H → L)",
-  };
-  return sortMap[sortValue] ?? "Current Sort";
+  const [field, direction] = sortValue.split("-");
+  return `${MARKET_SORT_LABELS[field] || "Funding"} (${field === "symbol" ? direction === "asc" ? "A → Z" : "Z → A" : direction === "asc" ? "L → H" : "H → L"})`;
+}
+function toggleMarketSort(field) {
+  if (!Object.hasOwn(MARKET_SORT_LABELS, field)) return;
+  const [currentField, currentDirection] = state.sort.split("-");
+  const direction = currentField === field ? currentDirection === "asc" ? "desc" : "asc" : field === "symbol" ? "asc" : "desc";
+  cancelBatchAnalysis("Sort changed; run analysis again");
+  state.sort = `${field}-${direction}`;
+  render();
+}
+function renderMarketSortHeaders() {
+  const [field, direction] = state.sort.split("-");
+  elements.marketSortButtons.forEach((button) => {
+    const active = button.dataset.marketSort === field;
+    const nextAscending = active ? direction === "desc" : button.dataset.marketSort === "symbol";
+    button.closest("th").setAttribute("aria-sort", active ? direction === "asc" ? "ascending" : "descending" : "none");
+    button.querySelector(".sort-indicator").textContent = active ? direction === "asc" ? "↑" : "↓" : "↕";
+    button.classList.toggle("sort-active", active);
+    button.setAttribute("aria-label", `Sort by ${MARKET_SORT_LABELS[button.dataset.marketSort]}, ${nextAscending ? "ascending" : "descending"}`);
+  });
 }
 
 function getActiveFiltersDescription() {
@@ -1896,11 +1957,21 @@ elements.analysisRows.addEventListener("click", (event) => {
   }
 });
 
-elements.sortSelect.addEventListener("change", (event) => {
-  cancelBatchAnalysis("Sort changed; run analysis again");
-  state.sort = event.target.value;
-  render();
+elements.batchSortButtons.forEach((button) => button.addEventListener("click", () => {
+  const field = button.dataset.batchSort;
+  const [current, direction] = state.analysisSort.split("-");
+  state.analysisSort = `${field}-${current === field ? direction === "asc" ? "desc" : "asc" : field === "symbol" ? "asc" : "desc"}`;
+  renderAnalysis();
+}));
+renderBatchSortHeaders();
+document.getElementById("toggleMarketDetails").addEventListener("click", () => {
+  const hidden = document.body.classList.toggle("market-details-hidden");
+  document.getElementById("toggleMarketDetails").textContent = hidden ? "Show details" : "Hide details";
+  document.getElementById("toggleMarketDetails").setAttribute("aria-expanded", String(!hidden));
 });
+
+elements.marketSortButtons.forEach((button) => button.addEventListener("click", () => toggleMarketSort(button.dataset.marketSort)));
+renderMarketSortHeaders();
 
 elements.historyWindowSelect.addEventListener("change", () => {
   cancelBatchAnalysis("Window changed; run analysis again");
