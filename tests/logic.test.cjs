@@ -11,7 +11,7 @@ function node(id) {
   if (!nodes.has(id)) nodes.set(id, {
     id, value: '', textContent: '', innerHTML: '', disabled: false, dataset: {}, style: {},
     classList: { add() {}, remove() {}, toggle() {} },
-    addEventListener() {}, setAttribute() {},
+    addEventListener() {}, setAttribute() {}, removeAttribute() {},
   });
   return nodes.get(id);
 }
@@ -501,4 +501,91 @@ test('an unsupported alternative exit gap does not prevent opening valid custom 
   assert.match(node('simBasisComparison').textContent, /current gap unchanged: unavailable/);
   assert.equal(node('simNet').textContent, run('formatSignedMoney(state.leaderboardRows[0].netUsd)'));
   run("state.activeView = 'viewMarketBoard'");
+});
+
+test('long-window history reports segment/sample progress, waits and full-cache completion', async () => {
+  const original = run('fetchFundingHistoryChunk');
+  const params = leaderboardParams();
+  context.__progressEnd = params.endTime;
+  const events = [];
+  context.__onProgress = event => events.push(event);
+  context.__progressChunk = async (symbol, start, end, signal, onStatus) => {
+    onStatus?.('Waiting 8s for API request budget');
+    const first = Math.ceil(start / 3600000) * 3600000;
+    return Array.from({ length: Math.max(0, Math.floor((end - first) / 3600000) + 1) }, (_, i) => ({ time: first + i * 3600000, fundingRate: '0.0001' }));
+  };
+  run('fetchFundingHistoryChunk = __progressChunk');
+  try {
+    const history = await run("fetchFundingHistory('progress-long-fixture',180,undefined,__progressEnd,__onProgress)");
+    assert.equal(history.length, 4320);
+    assert.ok(events.some(event => /Waiting 8s/.test(event.message)));
+    assert.ok(events.some(event => event.completed > 0 && event.completed < event.total && event.samples > 0));
+    assert.ok(events.every((event, i) => !i || event.completed >= events[i - 1].completed));
+    assert.equal(events.at(-1).stage, 'complete');
+    assert.equal(events.at(-1).completed, events.at(-1).total);
+    assert.equal(events.at(-1).samples, 4320);
+    events.length = 0;
+    await run("fetchFundingHistory('progress-long-fixture',180,undefined,__progressEnd,__onProgress)");
+    assert.equal(events.length, 1);
+    assert.equal(events[0].stage, 'complete');
+    assert.match(events[0].message, /cache/);
+  } finally { context.__restoreChunk = original; run('fetchFundingHistoryChunk = __restoreChunk'); }
+});
+
+test('history retries report rate limiting and the next retry attempt', async () => {
+  const originals = run('({scheduleHistoryRequest,sleep})');
+  const originalFetch = context.fetch;
+  let calls = 0;
+  const status = [];
+  const delays = [];
+  context.__retryStatus = message => status.push(message);
+  context.__retrySleep = async delay => delays.push(delay);
+  context.fetch = async () => ++calls === 1 ? { ok: false, status: 429, headers: { get: () => null } } : { ok: true, json: async () => [] };
+  run('scheduleHistoryRequest = async (request) => request(); sleep = __retrySleep');
+  try {
+    await run("fetchFundingHistoryChunk('retry-feedback',0,3600000,undefined,__retryStatus)");
+    assert.equal(calls, 2);
+    assert.match(status[0], /Rate limited; retrying in 8s \(attempt 2\/6\)/);
+    assert.deepEqual(delays, [8000]);
+  } finally {
+    context.fetch = originalFetch;
+    context.__retryOriginals = originals;
+    run('({scheduleHistoryRequest,sleep} = __retryOriginals)');
+  }
+});
+
+test('simulator cancellation aborts history and prevents late progress from changing the UI', async () => {
+  const originals = run('({fetchInfo,findSimulatorPairs,fetchFundingHistory})');
+  node('simWindow').value = '180';
+  context.__pairs = [leaderboardMarket];
+  let finish;
+  let signal;
+  let lateProgress;
+  let begin;
+  const started = new Promise(resolve => { begin = resolve; });
+  context.__simHistory = async (symbol, days, requestSignal, endTime, onProgress) => {
+    signal = requestSignal;
+    lateProgress = onProgress;
+    onProgress({ completed: 2, total: 10, message: '2/10 history segments · 960 hourly samples · Waiting 8s for API request budget' });
+    begin();
+    return new Promise(resolve => { finish = () => resolve([]); });
+  };
+  run('state.assetType = "all"; fetchInfo = async () => []; findSimulatorPairs = () => __pairs; fetchFundingHistory = __simHistory');
+  try {
+    const pending = run('runSimulator()');
+    await started;
+    assert.equal(node('simLoading').hidden, false);
+    assert.equal(node('simProgress').value, 20);
+    assert.match(node('simProgressText').textContent, /960 hourly samples/);
+    run('cancelSimulator()');
+    assert.equal(signal.aborted, true);
+    assert.equal(node('simLoading').hidden, true);
+    lateProgress({ completed: 10, total: 10, stage: 'complete', message: 'late result' });
+    finish();
+    await pending;
+    assert.equal(run('state.simSnapshot'), null);
+    assert.equal(node('simProgress').value, 20);
+    assert.equal(node('simRunButton').disabled, false);
+    assert.match(node('simStatus').textContent, /cancelled/);
+  } finally { context.__simOriginals = originals; run('({fetchInfo,findSimulatorPairs,fetchFundingHistory} = __simOriginals)'); }
 });

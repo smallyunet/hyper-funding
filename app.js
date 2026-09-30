@@ -90,6 +90,7 @@ const state = {
   symbolAnalysisRequest: 0,
   symbolOptionsKey: "",
   simRequest: 0,
+  simAbortController: null,
   simSnapshot: null,
   simPairs: [],
   simChartInstance: null,
@@ -181,6 +182,10 @@ const elements = {
   symbolPageStatus: document.getElementById("symbolPageStatus"),
   simStatus: document.getElementById("simStatus"),
   simRunButton: document.getElementById("simRunButton"),
+  simCancelButton: document.getElementById("simCancelButton"),
+  simLoading: document.getElementById("simLoading"),
+  simProgress: document.getElementById("simProgress"),
+  simProgressText: document.getElementById("simProgressText"),
   simWindow: document.getElementById("simWindow"),
   simPair: document.getElementById("simPair"),
   simPairStatus: document.getElementById("simPairStatus"),
@@ -1115,12 +1120,38 @@ function resetSimulator() {
   if (state.simChartInstance) { state.simChartInstance.destroy(); state.simChartInstance = null; }
 }
 
+function stopSimulatorLoading() {
+  state.simAbortController?.abort();
+  state.simAbortController = null;
+  elements.simCancelButton.disabled = true;
+  elements.simLoading.hidden = true;
+}
+
+function cancelSimulator() {
+  ++state.simRequest;
+  stopSimulatorLoading();
+  elements.simRunButton.disabled = false;
+  elements.simStatus.textContent = "Simulation cancelled. Select a pair or refresh to try again.";
+}
+
+function renderSimulatorProgress(progress) {
+  elements.simLoading.hidden = false;
+  if (progress.total > 0) elements.simProgress.value = progress.stage === "complete" ? 100 : Math.floor(progress.completed / progress.total * 100);
+  else elements.simProgress.removeAttribute("value");
+  elements.simProgressText.textContent = progress.total > 0 ? `${elements.simProgress.value}% · ${progress.message}` : progress.message;
+}
+
 async function runSimulator() {
+  stopSimulatorLoading();
   const requestId = ++state.simRequest;
+  const controller = new AbortController();
+  state.simAbortController = controller;
   const requestedPair = elements.simPair.value;
   state.simSnapshot = null;
   resetSimulator();
   elements.simRunButton.disabled = true;
+  elements.simCancelButton.disabled = false;
+  renderSimulatorProgress({ message: "Loading spot and perpetual quotes..." });
   elements.simStatus.textContent = "Loading current midpoints and historical funding samples...";
   elements.simPairStatus.textContent = "Checking current spot/perp midpoint pairs...";
   elements.simPairRows.innerHTML = `<tr><td colspan="6" class="empty-cell">Checking current pairs...</td></tr>`;
@@ -1128,9 +1159,9 @@ async function runSimulator() {
   try {
     if (![7, 14, 30, 60, 90, 180, 365].includes(days)) throw new Error("Select a supported history window");
     const [spotData, perpData, nativeData] = await Promise.all([
-      fetchInfo({ type: "spotMetaAndAssetCtxs" }),
-      fetchInfo({ type: "metaAndAssetCtxs", dex: "xyz" }),
-      fetchInfo({ type: "metaAndAssetCtxs" }),
+      fetchInfo({ type: "spotMetaAndAssetCtxs" }, controller.signal),
+      fetchInfo({ type: "metaAndAssetCtxs", dex: "xyz" }, controller.signal),
+      fetchInfo({ type: "metaAndAssetCtxs" }, controller.signal),
     ]);
     if (requestId !== state.simRequest) return;
     const pairs = findSimulatorPairs(spotData, perpData, nativeData).filter(matchesAssetType);
@@ -1152,19 +1183,33 @@ async function runSimulator() {
       elements.simStatus.textContent = `${market.spotToken}/USDC + ${market.perp}: ${market.reason}. Select a pair under “Midpoint scenario available” to simulate.`;
       return;
     }
-    const history = await fetchFundingHistory(market.perp, days);
+    const quoteFetchedAt = Date.now();
+    const history = await fetchFundingHistory(market.perp, days, controller.signal, undefined, (progress) => {
+      if (requestId !== state.simRequest) return;
+      renderSimulatorProgress(progress);
+      elements.simStatus.textContent = `${market.label} · ${getWindowLabel(days)} · ${progress.message}`;
+    });
     if (requestId !== state.simRequest) return;
     const points = buildSymbolAnalysisPoints(history);
     const stats = summarizeFundingHistory(market.perp, history);
     if (!stats || !points.length) throw new Error(`No valid ${market.perp} funding history is available`);
-    state.simSnapshot = { market, points, stats, days, historyFetchedAt: history.fetchedAt, quoteFetchedAt: Date.now() };
+    state.simSnapshot = { market, points, stats, days, historyFetchedAt: history.fetchedAt, quoteFetchedAt };
     renderSimulator();
+    const coverage = getSimulatorCoverage(stats, days);
+    renderSimulatorProgress({ total: 1, completed: 1, stage: "complete",
+      message: `History loaded · ${stats.samples}/${coverage.expectedSamples} hourly samples · ${coverage.complete ? "Complete" : "Partial"} coverage` });
   } catch (error) {
     if (requestId !== state.simRequest) return;
     console.error("Simulation unavailable", error);
     elements.simStatus.textContent = `Simulation unavailable: ${error.message}`;
   } finally {
-    if (requestId === state.simRequest) elements.simRunButton.disabled = false;
+    if (requestId === state.simRequest) {
+      state.simAbortController = null;
+      controller.abort();
+      elements.simRunButton.disabled = false;
+      elements.simCancelButton.disabled = true;
+      if (!state.simSnapshot) elements.simLoading.hidden = true;
+    }
   }
 }
 
@@ -1382,7 +1427,9 @@ async function runLeaderboard() {
       try {
         if (!histories.has(row.market.perp)) {
           // Cache failures too so another spot leg does not repeat failed API retries.
-          try { histories.set(row.market.perp, { history: await fetchFundingHistory(row.market.perp, params.days, controller.signal, params.endTime) }); }
+          try { histories.set(row.market.perp, { history: await fetchFundingHistory(row.market.perp, params.days, controller.signal, params.endTime, (progress) => {
+            if (requestId === state.leaderboardRequest) elements.leaderboardStatus.textContent = `Calculating ${completed} / ${eligible.length} · ${row.market.label} · ${progress.message}`;
+          }) }); }
           catch (error) { histories.set(row.market.perp, { error }); }
         }
         const source = histories.get(row.market.perp);
@@ -1417,6 +1464,7 @@ function openLeaderboardDetails(spotCoin) {
   if (!row || !params) return;
   // Invalidate an in-flight single-pair request before installing this snapshot.
   ++state.simRequest;
+  stopSimulatorLoading();
   state.simSnapshot = row.snapshot;
   state.simPairs = params.pairs;
   elements.simPair.innerHTML = renderSimulatorPairOptions(params.pairs);
@@ -1654,18 +1702,30 @@ function cancelBatchAnalysis(message = "Analysis cancelled") {
   renderAnalysis();
 }
 
-async function fetchFundingHistory(symbol, days, signal, windowEndTime) {
+async function fetchFundingHistory(symbol, days, signal, windowEndTime, onProgress) {
   signal?.throwIfAborted();
   // Fixed hourly windows keep every leaderboard row on the same funding period.
   const cacheKey = getHistoryCacheKey(symbol, days) + (windowEndTime == null ? "" : `.end.${windowEndTime}`);
   const cached = readHistoryCache(cacheKey);
-  if (cached) return Object.assign(cached.data, { fetchedAt: cached.savedAt });
+  if (cached) {
+    onProgress?.({ stage: "complete", completed: 1, total: 1, samples: cached.data.length, message: `Loaded ${cached.data.length} hourly samples from cache` });
+    return Object.assign(cached.data, { fetchedAt: cached.savedAt });
+  }
 
   const endTime = windowEndTime ?? Date.now();
   const startTime = endTime - days * 24 * 60 * 60 * 1000 + (windowEndTime == null ? 0 : 1);
   const chunkMs = FUNDING_HISTORY_CHUNK_HOURS * FUNDING_HISTORY_STEP_MS;
   const chunks = [];
   let hasSeenHistory = false;
+  let total = 0;
+  for (let end = endTime; end > startTime;) {
+    total += 1;
+    end = Math.max(startTime, Math.floor(end / chunkMs) * chunkMs) - 1;
+  }
+  let completed = 0;
+  const notify = (message, stage = "loading") => onProgress?.({ stage, completed, total, samples: chunks.length,
+    message: `${completed}/${total} history segments · ${chunks.length} hourly samples · ${message}` });
+  notify("Preparing funding history");
 
   for (let cursorEnd = endTime; cursorEnd > startTime;) {
     const bucketStart = Math.floor(cursorEnd / chunkMs) * chunkMs;
@@ -1673,23 +1733,27 @@ async function fetchFundingHistory(symbol, days, signal, windowEndTime) {
     const completeChunk = chunkStart === bucketStart && cursorEnd === bucketStart + chunkMs - 1;
     const chunkKey = `${HISTORY_CACHE_PREFIX}.chunk.${symbol}.${bucketStart}`;
     const savedChunk = completeChunk ? readHistoryCache(chunkKey, COMPLETED_CHUNK_CACHE_TTL_MS) : null;
-    const chunk = savedChunk ? savedChunk.data : await fetchFundingHistoryChunk(symbol, chunkStart, cursorEnd, signal);
+    notify(`Loading segment ${completed + 1}/${total}`);
+    const chunk = savedChunk ? savedChunk.data : await fetchFundingHistoryChunk(symbol, chunkStart, cursorEnd, signal, (message) => notify(message));
+    completed += 1;
     if (completeChunk && !savedChunk && chunk.length) writeHistoryCache(chunkKey, chunk);
-    if (!chunk.length && hasSeenHistory) break;
-    if (!chunk.length) { cursorEnd = chunkStart - 1; continue; }
+    if (!chunk.length && hasSeenHistory) { notify("No older funding history available"); break; }
+    if (!chunk.length) { notify("No samples in this segment"); cursorEnd = chunkStart - 1; continue; }
 
     hasSeenHistory = true;
     chunks.push(...chunk);
+    notify(savedChunk ? "Segment loaded from cache" : "Segment loaded");
     cursorEnd = chunkStart - 1;
   }
 
   const history = dedupeAndSortHistory(chunks).filter((item) => item.time >= startTime && item.time <= endTime);
   signal?.throwIfAborted();
   writeHistoryCache(cacheKey, history);
+  notify("Available funding history loaded", "complete");
   return Object.assign(history, { fetchedAt: Date.now() });
 }
 
-async function fetchFundingHistoryChunk(symbol, startTime, endTime, signal) {
+async function fetchFundingHistoryChunk(symbol, startTime, endTime, signal, onStatus) {
   let lastError;
 
   for (let attempt = 1; attempt <= HISTORY_CHUNK_RETRIES; attempt += 1) {
@@ -1704,7 +1768,7 @@ async function fetchFundingHistoryChunk(symbol, startTime, endTime, signal) {
           startTime,
           endTime,
         }),
-      }), estimateHistoryWeight(startTime, endTime), signal);
+      }), estimateHistoryWeight(startTime, endTime), signal, onStatus);
 
       if (!response.ok) {
         const error = new Error(`HTTP ${response.status}`);
@@ -1724,6 +1788,7 @@ async function fetchFundingHistoryChunk(symbol, startTime, endTime, signal) {
       lastError = error;
       if (attempt < HISTORY_CHUNK_RETRIES) {
         const delayMs = getHistoryRetryDelayMs(error, attempt);
+        onStatus?.(`${error?.status === 429 ? "Rate limited" : "Request failed"}; retrying in ${formatRetryDelay(delayMs)} (attempt ${attempt + 1}/${HISTORY_CHUNK_RETRIES})`);
         if (error?.status === 429 && state.analyzing) {
           setAnalysisStatus(`Rate limited; retrying ${symbol.replace("xyz:", "")} in ${formatRetryDelay(delayMs)}`);
         }
@@ -1741,7 +1806,8 @@ function estimateHistoryWeight(startTime, endTime) {
   return 20 + Math.ceil((endTime - startTime) / FUNDING_HISTORY_STEP_MS / 20);
 }
 
-function scheduleHistoryRequest(request, weight, signal) {
+function scheduleHistoryRequest(request, weight, signal, onStatus) {
+  onStatus?.("Queued for funding history");
   const run = historyRequestQueue.then(async () => {
     signal?.throwIfAborted();
     const elapsed = Date.now() - lastHistoryRequestAt;
@@ -1756,10 +1822,12 @@ function scheduleHistoryRequest(request, weight, signal) {
       if (used + weight <= HISTORY_WEIGHT_BUDGET) break;
       const waitMs = Math.max(250, historyWeightEvents[0].time + 60_000 - now + 50);
       if (state.analyzing) setAnalysisStatus(`Waiting ${formatRetryDelay(waitMs)} for API request budget`);
+      onStatus?.(`Waiting ${formatRetryDelay(waitMs)} for API request budget`);
       await sleep(waitMs, signal);
     }
     lastHistoryRequestAt = Date.now();
     historyWeightEvents.push({ time: lastHistoryRequestAt, weight });
+    onStatus?.("Requesting funding history...");
     return request();
   });
 
@@ -2137,6 +2205,7 @@ function setAssetType(value) {
   elements.symbolAnalysisStatus.textContent = "Asset category changed; select a symbol and run analysis.";
   resetSymbolAnalysis();
   state.simRequest += 1;
+  stopSimulatorLoading();
   state.simSnapshot = null;
   state.simPairs = [];
   elements.simRunButton.disabled = false;
@@ -2279,6 +2348,7 @@ for (const input of [elements.leaderboardWindow, elements.leaderboardExitScenari
   });
 }
 elements.simRunButton.addEventListener("click", runSimulator);
+elements.simCancelButton.addEventListener("click", cancelSimulator);
 elements.simPair.addEventListener("change", runSimulator);
 elements.simPairRows.addEventListener("click", (event) => {
   const button = event.target.closest("[data-sim-pair]");

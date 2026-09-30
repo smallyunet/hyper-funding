@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- ChartJS for Funding History Graphs -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=20260930-leaderboard-1" />
+    <link rel="stylesheet" href="./styles.css?v=20260930-simulator-progress-1" />
   </head>
   <body data-active-view="viewMarketBoard">
     <!-- Background grid decoration -->
@@ -539,7 +539,11 @@
               <h2>Funding Arbitrage Simulator</h2>
               <p id="simStatus" role="status">Load spot and perpetual midpoint prices to model a long spot / short perp scenario.</p>
             </div>
-            <button class="text-button primary-btn" id="simRunButton" type="button">Refresh &amp; Simulate</button>
+            <div class="table-tools"><button class="text-button secondary" id="simCancelButton" type="button" disabled>Cancel</button><button class="text-button primary-btn" id="simRunButton" type="button">Refresh &amp; Simulate</button></div>
+          </div>
+          <div id="simLoading" class="sim-loading" hidden>
+            <div class="sim-loading-heading"><strong>Simulation progress</strong><span id="simProgressText" role="status">Loading...</span></div>
+            <progress id="simProgress" max="100" aria-label="Simulation loading progress"></progress>
           </div>
           <div class="symbol-analysis-body simulator-body">
             <div class="scenario-scope">Long spot / short perp · current midpoint entry · hypothetical exit · historical funding replay</div>
@@ -600,6 +604,6 @@
       </div>
     </main>
 
-    <script src="./app.js?v=20260930-leaderboard-1"></script>
+    <script src="./app.js?v=20260930-simulator-progress-1"></script>
   </body>
 </html>
