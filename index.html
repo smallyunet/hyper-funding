@@ -481,7 +481,7 @@
             <div>
               <p class="eyebrow">SPOT + PERP · COMPARE SCENARIOS</p>
               <h2>Arbitrage Leaderboard</h2>
-              <p id="leaderboardStatus" role="status">Calculate all mapped spot / perp pairs with the same scenario, then open a pair to inspect its results.</p>
+              <p id="leaderboardStatus" role="status">Calculate all supported spot / perp candidates with the same scenario, then open a pair to inspect its results.</p>
             </div>
             <div class="table-tools">
               <button class="text-button secondary" id="leaderboardCancel" type="button" disabled>Cancel</button>
@@ -491,7 +491,7 @@
           <div class="symbol-analysis-body leaderboard-body">
             <div class="scenario-scope">Long spot / short perp · current midpoint entry · hypothetical exit · historical funding replay</div>
             <div class="leaderboard-controls">
-              <label class="select-field"><span>Asset category</span><select id="leaderboardAssetType"><option value="all">All assets</option><option value="crypto">Crypto</option><option value="stocks">Stocks</option><option value="indices">Indices</option><option value="commodities">Commodities</option><option value="fx">FX</option><option value="preipo">Pre-IPO</option><option value="other">Other / unknown</option></select></label>
+              <label class="select-field"><span>Asset category</span><select id="leaderboardAssetType"><option value="all">All supported pairs</option><option value="crypto">Crypto</option><option value="stocks">Stocks</option><option value="indices">Indices</option><option value="commodities">Commodities</option><option value="fx">FX</option><option value="preipo">Pre-IPO</option><option value="other">Other / unknown</option></select></label>
               <label class="select-field"><span>History window</span><select id="leaderboardWindow"><option value="7">7d</option><option value="14">14d</option><option value="30">30d</option><option value="60">60d</option><option value="90">90d</option><option value="180">180d</option><option value="365">1y</option></select></label>
               <label class="number-field"><span>Initial capital per pair (USDC)</span><input id="leaderboardCapital" type="number" min="100" step="100" value="10000" /></label>
               <label class="select-field"><span>Exit basis scenario</span><select id="leaderboardExitScenario"><option value="unchanged">Current gap unchanged</option><option value="converged">Gap converges to zero</option><option value="custom">Custom exit gap</option></select></label>
@@ -521,12 +521,12 @@
                   <th scope="col" class="num" aria-sort="none"><button class="market-sort-button" type="button" data-leaderboard-sort="coverage">Coverage <span class="sort-indicator" aria-hidden="true">↕</span></button></th>
                   <th scope="col">Status</th><th scope="col">Action</th>
                 </tr></thead>
-                <tbody id="leaderboardRows"><tr><td colspan="11" class="empty-cell">Choose a history window and calculate all mapped spot / perp pairs.</td></tr></tbody>
+                <tbody id="leaderboardRows"><tr><td colspan="11" class="empty-cell">Choose a history window and calculate all supported spot / perp candidates.</td></tr></tbody>
               </table>
             </div>
             <p class="sim-source-note">Complete histories are ranked by default. Partial histories remain visible with their available samples and internal gaps; enable the checkbox to rank them too. Missing hours are not filled or projected. APR uses elapsed replay hours, including internal gaps.</p>
             <details class="workspace-disclosure"><summary>Scope &amp; calculation assumptions</summary>
-              <p class="sim-source-note">Each row is an independent scenario with the full capital input, not a portfolio allocation. Only the simulator's explicitly mapped USDC spot / perp pairs are included; markets without a mapped spot leg are excluded. Missing midpoint prices and failed calculations are shown separately. Pair warnings remain visible, including unverified ticker matches and wrapper / redemption risk.</p>
+              <p class="sim-source-note">Each row is an independent scenario with the full capital input, not a portfolio allocation. Pairs are discovered from USDC spot markets and USDC-collateral perpetual venues. Other spot quotes and perp collateral are excluded. All supported pairs means all matching candidates in this scope, not every Hyperliquid asset. Missing midpoint prices and failed calculations are shown separately. Pair warnings remain visible, including unverified ticker matches and wrapper / redemption risk.</p>
               <p class="sim-source-note">The same sizing, four taker fees, signed funding replay and hypothetical exit basis calculations as Arbitrage Simulator are used. Half the capital is reserved for spot and half for 1× perp margin. APR simply annualizes modeled net return, including one-time fees and basis P&amp;L; it is not a forecast or realized return. Spread, slippage, borrowing and liquidation are excluded.</p>
               <p class="sim-source-note">All rows share one quote collection and one funding window ending at the latest hourly boundary. Details reuse the saved snapshot and parameters. Refresh &amp; Simulate in the detail tab starts a new calculation. Long windows may take longer due to the shared API request budget; completed history chunks are cached.</p>
             </details>
@@ -552,7 +552,7 @@
             <div class="sim-layout"><aside class="sim-controls"><section class="sim-workspace-section" aria-label="Scenario controls">
                 <div class="symbol-table-heading"><div><h3>Scenario controls</h3><p>Choose a pair, funding window, trade size and hypothetical exit.</p></div></div>
                 <div class="sim-input-grid">
-              <label class="select-field"><span>Asset category</span><select id="simAssetType"><option value="all">All assets</option><option value="crypto">Crypto</option><option value="stocks">Stocks</option><option value="indices">Indices</option><option value="commodities">Commodities</option><option value="fx">FX</option><option value="preipo">Pre-IPO</option><option value="other">Other / unknown</option></select></label>
+              <label class="select-field"><span>Asset category</span><select id="simAssetType"><option value="all">All supported pairs</option><option value="crypto">Crypto</option><option value="stocks">Stocks</option><option value="indices">Indices</option><option value="commodities">Commodities</option><option value="fx">FX</option><option value="preipo">Pre-IPO</option><option value="other">Other / unknown</option></select></label>
               <label class="select-field"><span>Spot / perp pair</span><select id="simPair"><option value="">Loading pairs...</option></select></label>
               <label class="select-field"><span>History window</span><select id="simWindow"><option value="7">7d</option><option value="14">14d</option><option value="30">30d</option><option value="60">60d</option><option value="90">90d</option><option value="180">180d</option><option value="365">1y</option></select></label>
               <label class="number-field"><span>Initial capital (USDC)</span><input id="simCapital" type="number" min="100" step="100" value="10000" /></label>
@@ -580,7 +580,7 @@
               <article class="stat-box"><span class="stat-label">Matched position</span><strong id="simPosition">--</strong></article>
             </div>
             <p class="sim-source-note" id="simSnapshot">Quotes: --</p></details>
-              <details class="workspace-disclosure"><summary>Calculation details &amp; assumptions</summary><p class="analysis-note">Any mapped crypto or stock spot / perp candidate with both current midpoint prices can be simulated, regardless of volume or order-book depth. Ticker-only matches may represent different assets or units. Historical funding rates are observed; entry uses current midpoints and exit uses a selected hypothetical gap. Neither is an executable fill or a historical trade.</p><p class="sim-source-note">Fees are editable account estimates. Half the capital is reserved for spot and half for 1× perp margin. Liquidity, bid/ask spread, slippage, borrowing, leverage, reinvestment, other future price moves and liquidation are excluded.</p><p class="sim-source-note" id="simAprDetails">APR calculation: --</p>
+              <details class="workspace-disclosure"><summary>Calculation details &amp; assumptions</summary><p class="analysis-note">Any supported spot / perp candidate with both current midpoint prices can be simulated, regardless of volume or order-book depth. Auto-discovered candidates assume equal token quantities; their underlying and unit are unverified. Ticker-only matches may represent different assets or units. Historical funding rates are observed; entry uses current midpoints and exit uses a selected hypothetical gap. Neither is an executable fill or a historical trade.</p><p class="sim-source-note">Fees are editable account estimates. Half the capital is reserved for spot and half for 1× perp margin. Liquidity, bid/ask spread, slippage, borrowing, leverage, reinvestment, other future price moves and liquidation are excluded.</p><p class="sim-source-note" id="simAprDetails">APR calculation: --</p>
             <section class="sim-calculations" aria-label="Fee and basis calculation details">
               <div class="symbol-table-heading"><div><h3>Fee &amp; basis details</h3><p>Calculations use the matched quantity and your selected fee rates and exit scenario.</p></div></div>
               <div class="sim-detail-grid">
@@ -592,7 +592,7 @@
               <p class="sim-event-summary" id="simPnlDetails">P&amp;L calculation: --</p>
             </section></details>
             </div></div>
-            <details class="workspace-disclosure pair-disclosure"><summary>Browse crypto &amp; stock pair candidates</summary><section class="sim-workspace-section" aria-label="Crypto and stock pair candidates">
+            <details class="workspace-disclosure pair-disclosure"><summary>Browse supported pair candidates</summary><section class="sim-workspace-section" aria-label="Crypto and stock pair candidates">
                 <div class="symbol-table-heading"><div><h3>Crypto &amp; Stock Pair Candidates</h3><p>Select a row to inspect its quotes and run the scenario.</p></div></div>
                 <div class="table-scroll sim-pair-scroll">
               <table class="analysis-table">
@@ -600,13 +600,13 @@
                 <tbody id="simPairRows"><tr><td colspan="6" class="empty-cell">Load markets to see eligible pairs</td></tr></tbody>
               </table>
                 </div>
-                <p class="sim-source-note" id="simPairStatus">Mapped crypto and stock pairs load from current Hyperliquid spot, native perpetual and XYZ markets. Markets without mapped spot legs remain available in funding analysis.</p>
+                <p class="sim-source-note" id="simPairStatus">Pairs load dynamically from USDC spot markets and all USDC-collateral perp venues. Pinned token identities are preserved; new candidates show underlying / unit warnings. Other quotes and collateral are excluded.</p>
               </section></details>
           </div>
         </section>
       </div>
     </main>
 
-    <script src="./app.js?v=20260930-navigation-1"></script>
+    <script src="./app.js?v=20260930-pair-discovery-1"></script>
   </body>
 </html>

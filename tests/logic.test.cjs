@@ -150,8 +150,8 @@ test('simulator separates verified xStocks from same-ticker reference markets', 
   assert.match(options, /<optgroup label="Midpoint scenario available">/);
   assert.match(options, /<optgroup label="No two-sided midpoint">/);
   assert.equal((options.match(/<option /g) || []).length, pairs.length);
-  assert.match(options, /value="@266"[^>]*>GOOGL/);
-  run("renderSimulatorPairList(__pairs, '@702')");
+  assert.match(options, /value="@266\|xyz:GOOGL"[^>]*>GOOGL/);
+  run("renderSimulatorPairList(__pairs, '@702|xyz:NVDA')");
   const pairRows = node('simPairRows').innerHTML;
   assert.match(pairRows, /https:\/\/app\.hyperliquid\.xyz\/trade\/NVDAX\/USDC/);
   assert.match(pairRows, /https:\/\/app\.hyperliquid\.xyz\/trade\/xyz%3ANVDA/);
@@ -441,7 +441,7 @@ test('fixed-window history shares one boundary, filters samples, and reuses cach
 
 test('batch reuses each perp history, retains individual errors and advances progress', async () => {
   setLeaderboardControls();
-  const originals = run('({fetchInfo,findSimulatorPairs,fetchFundingHistory})');
+  const originals = run('({fetchInfo,findSimulatorPairs,fetchFundingHistory,fetchSimulatorMarkets})');
   context.__pairs = [leaderboardMarket, { ...leaderboardMarket, spotCoin: '@2', spotToken: 'BTC2' },
     { ...leaderboardMarket, spotCoin: '@3', perp: 'FAIL' },
     { ...leaderboardMarket, spotCoin: '@4', perp: 'ETH' },
@@ -454,7 +454,7 @@ test('batch reuses each perp history, retains individual errors and advances pro
     if (symbol === 'ETH') history.splice(50, 1);
     return history;
   };
-  run('state.assetType = "all"; fetchInfo = async () => []; findSimulatorPairs = () => __pairs; fetchFundingHistory = __fetchFixture');
+  run('state.assetType = "all"; fetchSimulatorMarkets = async () => ({spotData:[],perpData:[],scopeNote:"fixture"}); fetchInfo = async () => []; findSimulatorPairs = () => __pairs; fetchFundingHistory = __fetchFixture');
   try {
     await run('runLeaderboard()');
     assert.deepEqual(requests.map(item => item.symbol), ['BTC', 'FAIL', 'ETH']);
@@ -464,12 +464,12 @@ test('batch reuses each perp history, retains individual errors and advances pro
     assert.equal(node('leaderboardRun').disabled, false);
     assert.match(node('leaderboardRows').innerHTML, /Excluded from ranking/);
     assert.match(node('leaderboardStatus').textContent, /2 complete · 1 partial · 1 unavailable · 1 failed/);
-  } finally { context.__originals = originals; run('({fetchInfo,findSimulatorPairs,fetchFundingHistory} = __originals)'); }
+  } finally { context.__originals = originals; run('({fetchInfo,findSimulatorPairs,fetchFundingHistory,fetchSimulatorMarkets} = __originals)'); }
 });
 
 test('cancelled batch cannot install late results or change the next run controls', async () => {
   setLeaderboardControls();
-  const originals = run('({fetchInfo,findSimulatorPairs,fetchFundingHistory})');
+  const originals = run('({fetchInfo,findSimulatorPairs,fetchFundingHistory,fetchSimulatorMarkets})');
   context.__pairs = [leaderboardMarket];
   let finishHistory;
   let historyStarted;
@@ -478,7 +478,7 @@ test('cancelled batch cannot install late results or change the next run control
     historyStarted();
     return new Promise(resolve => { finishHistory = () => resolve(leaderboardHistory({ endTime })); });
   };
-  run('fetchInfo = async () => []; findSimulatorPairs = () => __pairs; fetchFundingHistory = __pendingHistory');
+  run('fetchSimulatorMarkets = async () => ({spotData:[],perpData:[],scopeNote:"fixture"}); fetchInfo = async () => []; findSimulatorPairs = () => __pairs; fetchFundingHistory = __pendingHistory');
   try {
     const pending = run('runLeaderboard()');
     await started;
@@ -490,7 +490,7 @@ test('cancelled batch cannot install late results or change the next run control
     assert.equal(run('state.leaderboardRows.length'), 0);
     assert.equal(node('leaderboardStatus').textContent, 'changed');
     assert.equal(node('leaderboardRun').disabled, false);
-  } finally { context.__originals = originals; run('({fetchInfo,findSimulatorPairs,fetchFundingHistory} = __originals)'); }
+  } finally { context.__originals = originals; run('({fetchInfo,findSimulatorPairs,fetchFundingHistory,fetchSimulatorMarkets} = __originals)'); }
 });
 
 test('opening leaderboard details preserves quotes, history and parameters without fetching', () => {
@@ -579,7 +579,7 @@ test('history retries report rate limiting and the next retry attempt', async ()
 });
 
 test('simulator cancellation aborts history and prevents late progress from changing the UI', async () => {
-  const originals = run('({fetchInfo,findSimulatorPairs,fetchFundingHistory})');
+  const originals = run('({fetchInfo,findSimulatorPairs,fetchFundingHistory,fetchSimulatorMarkets})');
   node('simWindow').value = '180';
   context.__pairs = [leaderboardMarket];
   let finish;
@@ -594,7 +594,7 @@ test('simulator cancellation aborts history and prevents late progress from chan
     begin();
     return new Promise(resolve => { finish = () => resolve([]); });
   };
-  run('state.assetType = "all"; fetchInfo = async () => []; findSimulatorPairs = () => __pairs; fetchFundingHistory = __simHistory');
+  run('state.assetType = "all"; fetchSimulatorMarkets = async () => ({spotData:[],perpData:[],scopeNote:"fixture"}); fetchInfo = async () => []; findSimulatorPairs = () => __pairs; fetchFundingHistory = __simHistory');
   try {
     const pending = run('runSimulator()');
     await started;
@@ -611,7 +611,7 @@ test('simulator cancellation aborts history and prevents late progress from chan
     assert.equal(node('simProgress').value, 20);
     assert.equal(node('simRunButton').disabled, false);
     assert.match(node('simStatus').textContent, /cancelled/);
-  } finally { context.__simOriginals = originals; run('({fetchInfo,findSimulatorPairs,fetchFundingHistory} = __simOriginals)'); }
+  } finally { context.__simOriginals = originals; run('({fetchInfo,findSimulatorPairs,fetchFundingHistory,fetchSimulatorMarkets} = __simOriginals)'); }
 });
 
 test('zero references keep the cumulative origin separate from entry-fee break-even', () => {
@@ -680,4 +680,101 @@ test('before-open zero and profitable hypothetical exit do not count as entry-fe
   ] };
   assert.equal(run('buildSimulatorZeroReferences(__zeroResult).entryBreakEven'), undefined);
   assert.match(run('formatSimulatorZeroCrossing(undefined)'), /Not reached/);
+});
+
+test('dynamic discovery finds new exact tickers, Unit aliases and xStocks without admitting impostors or scaled tickers', () => {
+  context.__discoverySpot = [{tokens:[
+    {index:0,name:'USDC',isCanonical:true},
+    {index:1,name:'BERA',tokenId:'bera',szDecimals:2},
+    {index:2,name:'UFART',tokenId:'fart',fullName:'Unit Fartcoin',szDecimals:2},
+    {index:3,name:'SKHYX',tokenId:'sk',fullName:'Wrapped SK hynix xStock',szDecimals:2},
+    {index:4,name:'UBTC',tokenId:'impostor',fullName:'Unit Bitcoin',szDecimals:5},
+    {index:5,name:'BONK',tokenId:'bonk',szDecimals:0},
+    {index:6,name:'USDH',tokenId:'usdh',szDecimals:2},
+    {index:7,name:'DEAD',tokenId:'dead',szDecimals:2},
+  ],universe:[
+    {name:'@1',index:1,tokens:[1,0]}, {name:'@2',index:2,tokens:[2,0]},
+    {name:'@3',index:3,tokens:[3,0]}, {name:'@4',index:4,tokens:[4,0]},
+    {name:'@5',index:5,tokens:[5,0]}, {name:'@6',index:6,tokens:[1,6]},
+    {name:'@7',index:7,tokens:[7,0]},
+  ]},[
+    {coin:'@3',midPx:null,dayNtlVlm:'0'}, {coin:'@2',midPx:'1',dayNtlVlm:'10'},
+    {coin:'@1',midPx:'3',dayNtlVlm:'20'}, {coin:'@4',midPx:'80000'},
+    {coin:'@5',midPx:'.01'}, {coin:'@6',midPx:'3'}, {coin:'@7',midPx:'1'},
+  ]];
+  context.__discoveryPerps = [{universe:[
+    {name:'BERA',szDecimals:1}, {name:'xyz:BERA',szDecimals:2},
+    {name:'FARTCOIN',szDecimals:2}, {name:'xyz:SKHY',szDecimals:2},
+    {name:'BTC',szDecimals:5}, {name:'kBONK',szDecimals:0},
+    {name:'DEAD',szDecimals:2,isDelisted:true},
+  ]},[{midPx:'3'},{midPx:'3.1'},{midPx:'1.1'},{midPx:'200'},{midPx:'80000'},{midPx:'10'},{midPx:'1'}]];
+  run("state.marketMetadata.categories = new Map([['xyz:BERA','crypto'],['xyz:SKHY','stocks']])");
+  const pairs = run('findSimulatorPairs(__discoverySpot,__discoveryPerps)');
+  assert.equal(pairs.length, 4);
+  assert.deepEqual(Array.from(pairs, p => p.perp), ['BERA','xyz:BERA','FARTCOIN','xyz:SKHY']);
+  assert.equal(pairs[0].sizeDecimals, 1);
+  assert.equal(pairs[2].spotCoin, '@2');
+  assert.match(pairs[2].warning, /underlying \/ unit unverified/);
+  assert.match(pairs[2].warning, /wrapper/);
+  assert.equal(pairs[3].eligible, false);
+  assert.equal(pairs[3].category, 'stocks');
+  context.__discoveredPairs = pairs;
+  const options = run('renderSimulatorPairOptions(__discoveredPairs)');
+  assert.match(options, /value="@1\|BERA"/);
+  assert.match(options, /value="@1\|xyz:BERA"/);
+  run("renderSimulatorPairList(__discoveredPairs, '@1|xyz:BERA')");
+  assert.equal((node('simPairRows').innerHTML.match(/aria-pressed="true"/g) || []).length, 1);
+  assert.throws(() => run('findSimulatorPairs(__discoverySpot,[{universe:[{name:"BERA"}]},[]])'), /misaligned/);
+});
+
+test('market discovery scans every USDC venue, excludes other collateral and fails visibly on missing venues', async () => {
+  const original = run('fetchInfo');
+  const calls = [];
+  const controller = new AbortController();
+  context.__discoverySignal = controller.signal;
+  context.__discoveryFetch = async (payload, signal) => {
+    assert.equal(signal, controller.signal);
+    calls.push(payload);
+    if (payload.type === 'spotMetaAndAssetCtxs') return [{tokens:[{index:0,name:'USDC',isCanonical:true}]},[]];
+    if (payload.type === 'perpCategories') return [['other:BERA','crypto']];
+    if (payload.type === 'allPerpMetas') return [
+      {universe:[{name:'BTC'}]}, {universe:[{name:'xyz:NVDA'}],collateralToken:0},
+      {universe:[{name:'other:BERA'}],collateralToken:0},
+      {universe:[{name:'cash:NVDA'}],collateralToken:10},
+    ];
+    return [{universe:[{name:payload.dex ? `${payload.dex}:BERA` : 'BTC'}],collateralToken:0},[{midPx:'1'}]];
+  };
+  run('fetchInfo = __discoveryFetch');
+  try {
+    const result = await run('fetchSimulatorMarkets(__discoverySignal)');
+    assert.deepEqual(calls.filter(p => p.type === 'metaAndAssetCtxs').map(p => p.dex || ''), ['', 'xyz','other']);
+    assert.equal(result.perpData[0].universe.length, 3);
+    assert.equal(result.perpData[1].length, 3);
+    assert.match(result.scopeNote, /3 USDC-collateral/);
+    assert.match(result.scopeNote, /excluded: cash/);
+    context.__successfulDiscovery = context.__discoveryFetch;
+    run('fetchInfo = async (payload, signal) => { if(payload.dex === "other") throw new Error("venue offline"); return __successfulDiscovery(payload, signal); }');
+    await assert.rejects(run('fetchSimulatorMarkets(__discoverySignal)'), /venue offline/);
+  } finally { context.__originalDiscoveryFetch = original; run('fetchInfo = __originalDiscoveryFetch'); }
+});
+
+test('leaderboard opens the correct perp venue when multiple rows share one spot market', () => {
+  setLeaderboardControls();
+  context.__venueMarket = {...leaderboardMarket, pairId:'@1|xyz:BTC',perp:'xyz:BTC'};
+  run(`state.leaderboardRows = [
+    {market:{...__venueMarket,pairId:'@1|BTC',perp:'BTC'}, snapshot:{marker:'native'}},
+    {market:__venueMarket,snapshot:{marker:'xyz'}}
+  ]; state.leaderboardSnapshot = {pairs:state.leaderboardRows.map(r=>r.market),days:7,capital:10000,spotFee:0,perpFee:0,scenario:'unchanged',exitBasis:0};`);
+  const originals = run('({renderSimulator,switchTab})');
+  run('renderSimulator = () => {}; switchTab = () => {};');
+  try {
+    run("openLeaderboardDetails('@1|xyz:BTC')");
+    assert.equal(run('state.simSnapshot.marker'), 'xyz');
+    assert.equal(node('simPair').value, '@1|xyz:BTC');
+  } finally {context.__venueOriginals = originals; run('({renderSimulator,switchTab} = __venueOriginals)');}
+});
+
+
+test('extreme ticker-candidate gaps report the model and unit limitation clearly', () => {
+  assert.throws(() => run('modelFundingArbitrage([{time:1,rate:0}],1,100,10000,0,0,2)'), /different underlying assets or units/);
 });

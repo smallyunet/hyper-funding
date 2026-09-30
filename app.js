@@ -985,11 +985,58 @@ async function fetchInfo(payload, signal) {
   return response.json();
 }
 
+// A suffix alone does not establish a wrapper's underlying (e.g. UFART != FART).
+// New aliases are candidates, not verified 1:1 hedges.
+const UNIT_CANDIDATE_ALIASES = {
+  UFART: ["FARTCOIN", "Unit Fartcoin"], UPUMP: ["PUMP", "Unit Pump Fun"],
+  UENA: ["ENA", "Unit Ethena"], UXPL: ["XPL", "Unit Plasma"],
+  UWLD: ["WLD", "Unit Worldcoin"], UDZ: ["2Z", "Unit DoubleZero"],
+  UMON: ["MON", "Unit Monad"], UZEC: ["ZEC", "Unit Zcash"],
+  UVIRT: ["VIRTUAL", "Unit Virtual"], UAVAX: ["AVAX", "Unit Avalanche"],
+  UMEGA: ["MEGA", "Unit MegaETH"], UANSEM: ["ANSEM", "Unit Ansem"],
+};
+
+function simulatorPairKey(pair) { return pair.pairId || pair.spotCoin; }
+
+async function fetchSimulatorMarkets(signal) {
+  const [spotData, metas, categoryResult] = await Promise.all([
+    fetchInfo({ type: "spotMetaAndAssetCtxs" }, signal),
+    fetchInfo({ type: "allPerpMetas" }, signal),
+    fetchInfo({ type: "perpCategories" }, signal).then(value => ({ value }), error => ({ error })),
+  ]);
+  if (!Array.isArray(metas) || !metas.length || metas.some(meta => !Array.isArray(meta?.universe))) {
+    throw new Error("Perpetual market discovery is unavailable");
+  }
+  const usdc = spotData?.[0]?.tokens?.find(token => token.name === "USDC" && token.isCanonical === true);
+  if (!usdc) throw new Error("Canonical USDC spot token is unavailable");
+  // The model uses USDC notionals and equal token units. Other collateral needs
+  // conversion/margin modeling before its scenarios can be compared here.
+  const supported = metas.filter(meta => (meta.collateralToken ?? 0) === usdc.index && meta.universe.length);
+  const sources = [...new Set(supported.map(meta => meta.universe[0].name.includes(":") ? meta.universe[0].name.split(":")[0] : ""))];
+  const universe = [], contexts = [];
+  for (let offset = 0; offset < sources.length; offset += 3) {
+    const batch = await Promise.all(sources.slice(offset, offset + 3).map(dex =>
+      fetchInfo({ type: "metaAndAssetCtxs", ...(dex ? { dex } : {}) }, signal)));
+    for (const data of batch) {
+      if (!Array.isArray(data?.[0]?.universe) || !Array.isArray(data?.[1]) || data[0].universe.length !== data[1].length) {
+        throw new Error("Discovered perpetual metadata is unavailable or misaligned");
+      }
+      if ((data[0].collateralToken ?? 0) !== usdc.index) throw new Error("Perpetual collateral changed during discovery; refresh the snapshot");
+      universe.push(...data[0].universe);
+      contexts.push(...data[1]);
+    }
+  }
+  const excluded = metas.filter(meta => (meta.collateralToken ?? 0) !== usdc.index && meta.universe.length)
+    .map(meta => meta.universe[0].name.split(":")[0]);
+  return { spotData, perpData: [{ universe }, contexts], categories: categoryResult.value,
+    scopeNote: `${sources.length} USDC-collateral perp venues scanned; ${excluded.length ? `other collateral excluded: ${excluded.join(", ")}` : "no other-collateral venues"}${categoryResult.error ? "; classifications unavailable (unknown categories retained)" : ""}` };
+}
+
 function findSimulatorPairs(spotData, perpData, nativeData) {
   if (nativeData) {
-    // Validate each source before combining its index-aligned contexts.
-    normalizeRows(nativeData?.[0]?.universe, nativeData?.[1], "");
-    normalizeRows(perpData?.[0]?.universe, perpData?.[1], "xyz");
+    if (nativeData?.[0]?.universe?.length !== nativeData?.[1]?.length || perpData?.[0]?.universe?.length !== perpData?.[1]?.length) {
+      throw new Error("Current spot/perp metadata is unavailable or misaligned");
+    }
     perpData = [{ universe: [...perpData[0].universe, ...nativeData[0].universe] }, [...perpData[1], ...nativeData[1]]];
   }
   const [spotMeta, spotContexts] = spotData;
@@ -999,55 +1046,84 @@ function findSimulatorPairs(spotData, perpData, nativeData) {
     !Array.isArray(perpContexts) || perpMeta.universe.length !== perpContexts.length) {
     throw new Error("Current spot/perp metadata is unavailable or misaligned");
   }
-  const tokens = new Map(spotMeta.tokens.map((token) => [token.index, token]));
-  const contexts = new Map(spotContexts.map((context) => [context.coin, context]));
-  const perps = new Map(perpMeta.universe.map((asset, index) => [asset.name, { asset, context: perpContexts[index] }]));
-  const usdc = [...tokens.values()].find((token) => token.name === "USDC" && token.isCanonical === true);
+  const tokens = new Map(spotMeta.tokens.map(token => [token.index, token]));
+  const contexts = new Map(spotContexts.map(context => [context.coin, context]));
+  const perps = new Map(perpMeta.universe.filter(asset => !asset.isDelisted).map(asset => [asset.name, asset]));
+  const perpQuotes = new Map(perpMeta.universe.map((asset, index) => [asset.name, perpContexts[index]]));
+  const usdc = [...tokens.values()].find(token => token.name === "USDC" && token.isCanonical === true);
   if (!usdc) throw new Error("Canonical USDC spot token is unavailable");
-  return [...SIMULATOR_CRYPTO_PAIRS, ...SIMULATOR_PAIRS, ...SIMULATOR_TICKER_MATCHES].flatMap((definition) => {
-    const token = [...tokens.values()].find((item) => item.name === definition.spotToken &&
-      item.tokenId === definition.tokenId &&
-      (definition.fullName === null ? item.fullName == null : item.fullName === definition.fullName));
-    const pair = spotMeta.universe.find((item) => item.tokens?.[0] === token?.index && item.tokens?.[1] === usdc.index);
-    const spot = pair && contexts.get(pair.name);
-    const perp = perps.get(definition.perp);
-    const spotMid = toNumber(spot?.midPx);
-    const perpMid = toNumber(perp?.context?.midPx);
-    const volume = toNumber(spot?.dayNtlVlm);
-    if (!token || !pair || !perp || perp.asset.isDelisted) return [];
-    const hasQuotes = spotMid > 0 && perpMid > 0;
-    const reason = hasQuotes ? "" : "No current midpoint on both legs";
-    const warning = [definition.spotToken.startsWith("U") ? "Unit token; wrapper / redemption risk" : "", SIMULATOR_TICKER_MATCHES.includes(definition) ? "Ticker match; underlying unverified" : "",
+  const registry = [...SIMULATOR_CRYPTO_PAIRS, ...SIMULATOR_PAIRS, ...SIMULATOR_TICKER_MATCHES];
+  const pairs = new Map();
+  const add = (token, spotMarket, asset, definition, category, discovered) => {
+    const pairId = `${spotMarket.name}|${asset.name}`;
+    if (pairs.has(pairId)) return;
+    const spot = contexts.get(spotMarket.name), perp = perpQuotes.get(asset.name);
+    const spotMid = toNumber(spot?.midPx), perpMid = toNumber(perp?.midPx), volume = toNumber(spot?.dayNtlVlm);
+    const eligible = spotMid > 0 && perpMid > 0;
+    const warning = [token.fullName?.startsWith("Unit ") ? "Unit token; wrapper / redemption risk" : "",
+      discovered ? "Auto-discovered candidate; underlying / unit unverified; assumes 1:1 quantities" :
+        SIMULATOR_TICKER_MATCHES.includes(definition) ? "Ticker match; underlying unverified" : "",
       volume === 0 ? "No spot trades in 24h" : "",
-      hasQuotes && Math.abs(spotMid - perpMid) / perpMid > 0.05 ? "Midpoint gap > 5%" : ""]
-      .filter(Boolean).join(" · ");
-    return [{ ...definition, category: SIMULATOR_CRYPTO_PAIRS.includes(definition) ? "crypto" : "stocks", spotCoin: pair.name, spotIndex: pair.index, spotMid, perpMid, volume,
-      reason, warning, eligible: hasQuotes, sizeDecimals: Math.min(token.szDecimals, perp.asset.szDecimals) }];
-  }).sort((a, b) => Number(b.eligible) - Number(a.eligible));
+      eligible && Math.abs(spotMid - perpMid) / perpMid > 0.05 ? "Midpoint gap > 5%" : ""].filter(Boolean).join(" · ");
+    pairs.set(pairId, { ...definition, spotToken: token.name, tokenId: token.tokenId, fullName: token.fullName,
+      pairId, category, spotCoin: spotMarket.name, spotIndex: spotMarket.index, perp: asset.name,
+      spotMid, perpMid, volume, warning, discovered, eligible,
+      reason: eligible ? "" : "No current midpoint on both legs",
+      sizeDecimals: Math.min(token.szDecimals, asset.szDecimals) });
+  };
+  // Preserve pinned identities, including rejecting same-name impostors.
+  for (const definition of registry) {
+    const token = [...tokens.values()].find(item => item.name === definition.spotToken && item.tokenId === definition.tokenId &&
+      (definition.fullName === null ? item.fullName == null : item.fullName === definition.fullName));
+    const spotMarket = token && spotMeta.universe.find(item => item.tokens?.[0] === token.index && item.tokens?.[1] === usdc.index);
+    const asset = perps.get(definition.perp);
+    if (spotMarket && asset) add(token, spotMarket, asset, definition, SIMULATOR_CRYPTO_PAIRS.includes(definition) ? "crypto" : "stocks", false);
+  }
+  for (const spotMarket of spotMeta.universe) {
+    const token = tokens.get(spotMarket.tokens?.[0]);
+    if (!token?.tokenId || spotMarket.tokens?.[1] !== usdc.index) continue;
+    const pinned = registry.filter(item => item.spotToken === token.name);
+    const definition = pinned.find(item => item.tokenId === token.tokenId &&
+      (item.fullName === null ? token.fullName == null : item.fullName === token.fullName));
+    if (pinned.length && !definition) continue;
+    const alias = UNIT_CANDIDATE_ALIASES[token.name];
+    const isStockWrapper = /xStock$/.test(token.fullName || "");
+    const underlying = definition?.label || (alias && alias[1] === token.fullName ? alias[0] :
+      isStockWrapper && token.name.endsWith("X") ? token.name.slice(0, -1) : token.name);
+    for (const asset of perps.values()) {
+      const symbol = asset.name.split(":").pop();
+      if (symbol !== underlying) continue;
+      const category = marketCategory(asset.name);
+      // Stock wrappers do not become crypto matches through a ticker collision.
+      if ((isStockWrapper || definition && !SIMULATOR_CRYPTO_PAIRS.includes(definition)) && category === "crypto") continue;
+      add(token, spotMarket, asset, { label: underlying }, category, true);
+    }
+  }
+  return [...pairs.values()].sort((a, b) => Number(b.eligible) - Number(a.eligible));
 }
 
 function renderSimulatorPairList(pairs, selected) {
   elements.simPairRows.innerHTML = pairs.length ? pairs.map((pair) => `
-    <tr class="sim-pair-row ${pair.spotCoin === selected ? "selected" : ""}">
+    <tr class="sim-pair-row ${simulatorPairKey(pair) === selected ? "selected" : ""}">
       <td>
         <span class="symbol-chip" data-category="${escapeHtml(pair.category)}">${escapeHtml(categoryLabel(pair.category))}</span> <strong>${escapeHtml(pair.label)}</strong> <span class="stat-desc">${escapeHtml(pair.spotToken)}/USDC ↔ ${escapeHtml(pair.perp)}</span>
         <div class="sim-pair-links">
           <a href="https://app.hyperliquid.xyz/trade/${encodeURIComponent(pair.spotToken)}/USDC" target="_blank" rel="noopener noreferrer" aria-label="Open ${escapeHtml(pair.spotToken)}/USDC spot on Hyperliquid">Spot ↗</a>
           <a href="https://app.hyperliquid.xyz/trade/${encodeURIComponent(pair.perp)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${escapeHtml(pair.perp)} perpetual on Hyperliquid">Perp ↗</a>
         </div>
-        ${pair.reason || pair.warning ? `<span class="stat-desc sim-pair-warning">${escapeHtml(pair.reason || pair.warning)}</span>` : ""}
+        ${pair.reason || pair.warning ? `<span class="stat-desc sim-pair-warning">${escapeHtml([pair.reason, pair.warning].filter(Boolean).join(" · "))}</span>` : ""}
       </td>
       <td class="num">${pair.spotMid > 0 ? formatNumber(pair.spotMid, pair.spotMid < 1 ? 6 : 2) : "--"}</td>
       <td class="num">${pair.perpMid > 0 ? formatNumber(pair.perpMid, pair.perpMid < 1 ? 6 : 2) : "--"}</td>
       <td class="num">${pair.spotMid > 0 && pair.perpMid > 0 ? signedPercent((pair.perpMid - pair.spotMid) / pair.spotMid) : "--"}</td>
       <td class="num">${formatUsd(pair.volume)}</td>
-      <td><button class="text-button secondary" type="button" data-sim-pair="${escapeHtml(pair.spotCoin)}" aria-pressed="${pair.spotCoin === selected}">${pair.spotCoin === selected ? "Selected" : pair.eligible ? "Simulate" : "View"}</button></td>
+      <td><button class="text-button secondary" type="button" data-sim-pair="${escapeHtml(simulatorPairKey(pair))}" aria-pressed="${simulatorPairKey(pair) === selected}">${simulatorPairKey(pair) === selected ? "Selected" : pair.eligible ? "Simulate" : "View"}</button></td>
     </tr>`).join("") : `<tr><td colspan="6" class="empty-cell">No pairs currently pass the market checks</td></tr>`;
 }
 
 function renderSimulatorPairOptions(pairs) {
   const options = (rows) => rows.map((pair) =>
-    `<option value="${escapeHtml(pair.spotCoin)}">${escapeHtml(pair.label)} · ${escapeHtml(pair.spotToken)}/USDC + ${escapeHtml(pair.perp)}${pair.eligible ? "" : " · No midpoint"}</option>`).join("");
+    `<option value="${escapeHtml(simulatorPairKey(pair))}">${escapeHtml(pair.label)} · ${escapeHtml(pair.spotToken)}/USDC + ${escapeHtml(pair.perp)}${pair.eligible ? "" : " · No midpoint"}</option>`).join("");
   return pairs.length ?
     `<optgroup label="Midpoint scenario available">${options(pairs.filter((pair) => pair.eligible))}</optgroup>` +
     `<optgroup label="No two-sided midpoint">${options(pairs.filter((pair) => !pair.eligible))}</optgroup>` :
@@ -1055,6 +1131,9 @@ function renderSimulatorPairOptions(pairs) {
 }
 
 function modelFundingArbitrage(points, spotMid, perpMid, capital, spotFee, perpFee, sizeDecimals, exitBasisRate = (perpMid - spotMid) / spotMid) {
+  if (spotMid > 0 && perpMid > 0 && Number.isFinite(exitBasisRate) && (exitBasisRate <= -1 || exitBasisRate > 10)) {
+    throw new Error("Scenario exit gap outside model range (above -100%, at most 1000%); current prices may represent different underlying assets or units");
+  }
   if (!Number.isFinite(capital) || capital < 100 || !Number.isFinite(spotFee) || !Number.isFinite(perpFee) ||
     spotFee < 0 || perpFee < 0 || spotFee > 0.1 || perpFee > 0.1 || !points.length ||
     !(spotMid > 0 && perpMid > 0) || !Number.isFinite(exitBasisRate) || exitBasisRate <= -1 || exitBasisRate > 10) {
@@ -1180,26 +1259,23 @@ async function runSimulator() {
   const days = Number(elements.simWindow.value);
   try {
     if (![7, 14, 30, 60, 90, 180, 365].includes(days)) throw new Error("Select a supported history window");
-    const [spotData, perpData, nativeData] = await Promise.all([
-      fetchInfo({ type: "spotMetaAndAssetCtxs" }, controller.signal),
-      fetchInfo({ type: "metaAndAssetCtxs", dex: "xyz" }, controller.signal),
-      fetchInfo({ type: "metaAndAssetCtxs" }, controller.signal),
-    ]);
+    const { spotData, perpData, categories, scopeNote } = await fetchSimulatorMarkets(controller.signal);
     if (requestId !== state.simRequest) return;
-    const pairs = findSimulatorPairs(spotData, perpData, nativeData).filter(matchesAssetType);
+    state.marketMetadata.categories = new Map(Array.isArray(categories) ? categories : []);
+    const pairs = findSimulatorPairs(spotData, perpData).filter(matchesAssetType);
     state.simPairs = pairs;
     const eligiblePairs = pairs.filter((pair) => pair.eligible);
     elements.simPair.innerHTML = renderSimulatorPairOptions(pairs);
     if (!pairs.length) {
       renderSimulatorPairList(pairs, "");
-      elements.simPairStatus.textContent = "No mapped USDC spot/perp pairs in this category. Markets without a mapped spot leg remain available in funding analysis.";
+      elements.simPairStatus.textContent = "No matching USDC spot/perp candidates in this category. Markets without a mapped spot leg remain available in funding analysis.";
       elements.simStatus.textContent = "No simulator pairs for the selected asset category";
       return;
     }
-    const market = pairs.find((pair) => pair.spotCoin === requestedPair) || eligiblePairs[0] || pairs[0];
-    elements.simPair.value = market.spotCoin;
-    renderSimulatorPairList(pairs, market.spotCoin);
-    elements.simPairStatus.textContent = `${eligiblePairs.length} midpoint scenarios · ${pairs.length} mapped crypto / stock candidates listed · ${market.spotToken}/USDC market ${market.spotCoin} · token ${market.tokenId} · 24h spot volume ${formatMoney(market.volume)}.${market.warning ? ` ${market.warning}.` : ""} Midpoint prices do not show executable costs.`;
+    const market = pairs.find((pair) => simulatorPairKey(pair) === requestedPair) || eligiblePairs[0] || pairs[0];
+    elements.simPair.value = simulatorPairKey(market);
+    renderSimulatorPairList(pairs, simulatorPairKey(market));
+    elements.simPairStatus.textContent = `${eligiblePairs.length} midpoint scenarios · ${pairs.length} supported pair candidates · ${scopeNote} · ${market.spotToken}/USDC market ${market.spotCoin} · token ${market.tokenId} · 24h spot volume ${formatMoney(market.volume)}.${market.warning ? ` ${market.warning}.` : ""} Midpoint prices do not show executable costs.`;
     elements.simRunButton.textContent = market.eligible ? "Refresh & Simulate" : "Refresh Pair";
     if (!market.eligible) {
       elements.simStatus.textContent = `${market.spotToken}/USDC + ${market.perp}: ${market.reason}. Select a pair under “Midpoint scenario available” to simulate.`;
@@ -1374,7 +1450,7 @@ function renderLeaderboard() {
     const { market } = row;
     const ranked = row.snapshot && (row.complete || elements.leaderboardIncludePartial.checked);
     const coverage = row.coverageDetails;
-    return `<tr ${row.snapshot ? `data-leaderboard-pair="${escapeHtml(market.spotCoin)}"` : ""}>
+    return `<tr ${row.snapshot ? `data-leaderboard-pair="${escapeHtml(simulatorPairKey(market))}"` : ""}>
       <td class="num">${ranked ? ++rank : "--"}</td>
       <td class="leaderboard-pair"><strong>${escapeHtml(market.label)}</strong> <span class="symbol-chip">${escapeHtml(categoryLabel(market.category))}</span>
         <span class="stat-desc">${escapeHtml(market.spotToken)}/USDC + ${escapeHtml(market.perp)}</span>
@@ -1389,9 +1465,9 @@ function renderLeaderboard() {
       <td><span class="coverage-badge ${row.complete ? "complete" : "partial"}">${escapeHtml(row.status)}</span>
         ${row.reason ? `<span class="stat-desc leaderboard-reason">${escapeHtml(row.reason)}</span>` : ""}
         ${row.status === "Partial" && !ranked ? '<span class="stat-desc">Excluded from ranking</span>' : ""}</td>
-      <td>${row.snapshot ? `<button class="row-analysis-button" type="button" data-leaderboard-pair="${escapeHtml(market.spotCoin)}">View details</button>` : "--"}</td>
+      <td>${row.snapshot ? `<button class="row-analysis-button" type="button" data-leaderboard-pair="${escapeHtml(simulatorPairKey(market))}">View details</button>` : "--"}</td>
     </tr>`;
-  }).join("") || '<tr><td colspan="11" class="empty-cell">Choose a history window and calculate all mapped spot / perp pairs.</td></tr>';
+  }).join("") || '<tr><td colspan="11" class="empty-cell">Choose a history window and calculate all supported spot / perp candidates.</td></tr>';
 }
 
 function cancelLeaderboard(message = "Calculation cancelled; completed results retained.", clear = true) {
@@ -1424,13 +1500,10 @@ async function runLeaderboard() {
   elements.leaderboardCancel.disabled = false;
   state.leaderboardSort = "apr-desc";
   try {
-    const [spotData, perpData, nativeData] = await Promise.all([
-      fetchInfo({ type: "spotMetaAndAssetCtxs" }, controller.signal),
-      fetchInfo({ type: "metaAndAssetCtxs", dex: "xyz" }, controller.signal),
-      fetchInfo({ type: "metaAndAssetCtxs" }, controller.signal),
-    ]);
+    const { spotData, perpData, categories, scopeNote } = await fetchSimulatorMarkets(controller.signal);
     if (requestId !== state.leaderboardRequest) return;
-    const pairs = findSimulatorPairs(spotData, perpData, nativeData).filter(matchesAssetType);
+    state.marketMetadata.categories = new Map(Array.isArray(categories) ? categories : []);
+    const pairs = findSimulatorPairs(spotData, perpData).filter(matchesAssetType);
     const quoteFetchedAt = Date.now();
     params = { ...params, quoteFetchedAt, endTime: Math.floor(quoteFetchedAt / FUNDING_HISTORY_STEP_MS) * FUNDING_HISTORY_STEP_MS, pairs };
     state.leaderboardSnapshot = params;
@@ -1467,7 +1540,7 @@ async function runLeaderboard() {
       renderLeaderboard();
     }
     const count = (status) => state.leaderboardRows.filter((row) => row.status === status).length;
-    elements.leaderboardStatus.textContent = `${pairs.length} mapped pairs · ${count("Complete")} complete · ${count("Partial")} partial · ${count("Unavailable")} unavailable · ${count("Failed")} failed. Markets without mapped spot legs are excluded.`;
+    elements.leaderboardStatus.textContent = `${pairs.length} pair candidates · ${scopeNote} · ${count("Complete")} complete · ${count("Partial")} partial · ${count("Unavailable")} unavailable · ${count("Failed")} failed. Markets without matching spot legs are excluded.`;
   } catch (error) {
     if (requestId !== state.leaderboardRequest || error.name === "AbortError") return;
     elements.leaderboardStatus.textContent = `Leaderboard unavailable: ${error.message}`;
@@ -1481,7 +1554,7 @@ async function runLeaderboard() {
 }
 
 function openLeaderboardDetails(spotCoin) {
-  const row = state.leaderboardRows.find((item) => item.market.spotCoin === spotCoin && item.snapshot);
+  const row = state.leaderboardRows.find((item) => simulatorPairKey(item.market) === spotCoin && item.snapshot);
   const params = state.leaderboardSnapshot;
   if (!row || !params) return;
   // Invalidate an in-flight single-pair request before installing this snapshot.
@@ -2316,10 +2389,10 @@ function setAssetType(value) {
   state.simSnapshot = null;
   state.simPairs = [];
   elements.simRunButton.disabled = false;
-  elements.simStatus.textContent = "Asset category changed; load mapped pairs to run a scenario.";
+  elements.simStatus.textContent = "Asset category changed; discover pairs to run a scenario.";
   elements.simPair.innerHTML = '<option value="">Load pairs for this category</option>';
   elements.simPairRows.innerHTML = '<tr><td colspan="6" class="empty-cell">Load pairs for this category</td></tr>';
-  elements.simPairStatus.textContent = "Only explicitly mapped USDC spot/perp pairs can be simulated. Other markets remain available in funding analysis.";
+  elements.simPairStatus.textContent = "Pairs are discovered from USDC spot markets and USDC-collateral perp venues. New candidates retain underlying / unit warnings.";
   resetSimulator();
   render();
   if (state.activeView === "viewSimulator") runSimulator();
