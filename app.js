@@ -982,6 +982,14 @@ function modelFundingArbitrage(points, spotMid, perpMid, capital, spotFee, perpF
     fundingUsd: curve.at(-1).fundingUsd, netUsd: curve.at(-1).netUsd, returnRate: curve.at(-1).netUsd / capital, curve };
 }
 
+function annualizeScenarioReturn(returnRate, firstSampleTime, lastSampleTime) {
+  // Each hourly funding sample represents the hour ending at its timestamp.
+  const hours = (lastSampleTime - firstSampleTime) / FUNDING_HISTORY_STEP_MS + 1;
+  const valid = Number.isFinite(returnRate) && Number.isFinite(firstSampleTime) &&
+    Number.isFinite(lastSampleTime) && lastSampleTime >= firstSampleTime && hours > 0;
+  return { hours: valid ? hours : NaN, apr: valid ? returnRate * (365 * 24) / hours : NaN };
+}
+
 function renderSimulatorCalculationDetails(result, market, spotFee, perpFee, scenario) {
   const number = (value) => formatNumber(value, 8);
   const money = (value) => `${value < 0 ? "-" : ""}$${formatNumber(Math.abs(value), 4)}`;
@@ -1013,7 +1021,8 @@ function renderSimulatorCalculationDetails(result, market, spotFee, perpFee, sce
 
 function resetSimulator() {
   for (const id of ["simSpotQuote", "simPerpQuote", "simBasis", "simPosition", "simFunding",
-    "simEntryFees", "simExitFees", "simExitBasisDisplay", "simPricePnl", "simNet", "simReturn"]) document.getElementById(id).textContent = "--";
+    "simEntryFees", "simExitFees", "simExitBasisDisplay", "simPricePnl", "simNet", "simReturn", "simApr"]) document.getElementById(id).textContent = "--";
+  document.getElementById("simAprDetails").textContent = "APR calculation: --";
   document.getElementById("simSnapshot").textContent = "Quotes: --";
   document.getElementById("simBasisComparison").textContent = "Basis scenario comparison: --";
   document.getElementById("simCoverage").textContent = "Coverage: --";
@@ -1115,6 +1124,11 @@ function renderSimulator() {
   set("simPricePnl", formatSignedMoney(result.pricePnl));
   set("simNet", formatSignedMoney(result.netUsd));
   set("simReturn", signedPercent(result.returnRate));
+  const annualized = annualizeScenarioReturn(result.returnRate, stats.firstSampleTime, stats.lastSampleTime);
+  set("simApr", Number.isFinite(annualized.apr) ? signedPercent(annualized.apr) : "--");
+  set("simAprDetails", Number.isFinite(annualized.apr) ?
+    `APR = return on initial capital × 8,760 ÷ replay hours = ${signedPercent(result.returnRate)} × 8,760 ÷ ${formatNumber(annualized.hours, 2)} = ${signedPercent(annualized.apr)}. Replay duration: ${formatNumber(annualized.hours / 24, 4)} days, from one hour before the first sample through the last sample. ${simComplete ? "Complete coverage." : "Partial coverage; only available funding samples contribute to net P&L, while missing hours remain in the elapsed duration and are not estimated."} Simple annualization of modeled net P&L after entry/exit fees and the selected basis P&L; no compounding. Uses unrounded return values. This scales the whole scenario, including its one-time fees and basis change, and is not a forecast or realized APR.` :
+    "APR unavailable: a valid replay duration is required.");
   renderSimulatorCalculationDetails(result, market, spotFee, perpFee, elements.simExitScenario.value);
   const unchanged = modelFundingArbitrage(points, market.spotMid, market.perpMid, capital, spotFee, perpFee, market.sizeDecimals, currentBasisRate);
   const converged = modelFundingArbitrage(points, market.spotMid, market.perpMid, capital, spotFee, perpFee, market.sizeDecimals, 0);

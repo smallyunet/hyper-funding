@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- ChartJS for Funding History Graphs -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=20260930-calculation-details" />
+    <link rel="stylesheet" href="./styles.css?v=20260930-scenario-apr" />
   </head>
   <body>
     <!-- Background grid decoration -->
@@ -539,7 +539,9 @@
               <article class="stat-box"><span class="stat-label">Basis change P&amp;L</span><strong id="simPricePnl">--</strong></article>
               <article class="stat-box sim-net"><span class="stat-label">Modeled net P&amp;L</span><strong id="simNet">--</strong></article>
               <article class="stat-box"><span class="stat-label">Return on initial capital</span><strong id="simReturn">--</strong></article>
+              <article class="stat-box"><span class="stat-label">Modeled net APR · simple annualization</span><strong id="simApr">--</strong><span class="stat-desc">Annualized return on initial capital</span></article>
             </div>
+            <p class="sim-source-note" id="simAprDetails">APR calculation: --</p>
             <section class="sim-calculations" aria-label="Fee and basis calculation details">
               <div class="symbol-table-heading"><div><h3>Fee &amp; basis details</h3><p>Calculations use the matched quantity and your selected fee rates and exit scenario.</p></div></div>
               <div class="sim-detail-grid">
@@ -564,6 +566,6 @@
       </div>
     </main>
 
-    <script src="./app.js?v=20260930-calculation-details"></script>
+    <script src="./app.js?v=20260930-scenario-apr"></script>
   </body>
 </html>

@@ -169,6 +169,21 @@ test('exit basis convergence changes price P&L and exit perp fee', () => {
   assert.throws(() => run('modelFundingArbitrage(__points,100,90,1000,0.001,0.002,0,-1)'), /exit gap/);
 });
 
+test('scenario APR annualizes net capital return over elapsed replay hours including the first funding hour', () => {
+  const hour = 3600000;
+  context.__aprFirst = hour;
+  context.__aprLast = 168 * hour;
+  const weekly = run('annualizeScenarioReturn(-0.000633,__aprFirst,__aprLast)');
+  assert.equal(weekly.hours, 168);
+  assert.ok(Math.abs(weekly.apr - (-0.000633 * 365 / 7)) < 1e-12);
+  assert.equal(run('annualizeScenarioReturn(0.01,3600000,3600000).hours'), 1);
+  assert.equal(run('annualizeScenarioReturn(0.01,3600000,10800000).hours'), 3);
+  assert.equal(run('annualizeScenarioReturn(0,3600000,10800000).apr'), 0);
+  assert.equal(run('annualizeScenarioReturn(0.1,3600000,31536000000).apr'), 0.1);
+  assert.ok(Number.isNaN(run('annualizeScenarioReturn(0.1,2,1).apr')));
+  assert.ok(Number.isNaN(run('annualizeScenarioReturn(0.1,NaN,1).apr')));
+});
+
 test('fee details reconcile both legs and show the selected exit price and basis', () => {
   run(`
     __detailMarket = {spotMid:100,perpMid:90};
@@ -189,6 +204,8 @@ test('fee details reconcile both legs and show the selected exit price and basis
     assert.doesNotMatch(node(id).textContent, /105|0\.8400/);
   }
   assert.equal(node('simPnlDetails').textContent, 'P&L calculation: --');
+  assert.equal(node('simApr').textContent, '--');
+  assert.equal(node('simAprDetails').textContent, 'APR calculation: --');
 });
 
 test('chart applies entry costs at open and exit costs after the last funding sample', () => {
