@@ -984,6 +984,7 @@ function resetSimulator() {
   document.getElementById("simBasisComparison").textContent = "Basis scenario comparison: --";
   document.getElementById("simCoverage").textContent = "Coverage: --";
   document.getElementById("simChartRange").textContent = "--";
+  document.getElementById("simEventSummary").textContent = "Opening and closing costs: --";
   if (state.simChartInstance) { state.simChartInstance.destroy(); state.simChartInstance = null; }
 }
 
@@ -1082,9 +1083,10 @@ function renderSimulator() {
   const reservedCapital = result.spotEntry * (1 + spotFee) + result.perpEntry * (1 + perpFee);
   set("simSnapshot", `Midpoints read ${formatUtc(snapshot.quoteFetchedAt)} UTC · Funding history read ${formatUtc(snapshot.historyFetchedAt)} UTC. Matched position reserves ${formatMoney(reservedCapital)} of ${formatMoney(capital)}; ${formatMoney(Math.max(0, capital - reservedCapital))} remains unallocated due to the 1× capital split and size increment. Exit spot is held at its current midpoint; exit perp is set by the selected basis. Spread and slippage are excluded.${market.warning ? ` ${market.warning}.` : ""}`);
   set("simCoverage", `Coverage: ${simComplete ? "Complete" : "Partial"} · ${stats.samples}/${coverage.expectedSamples} requested hourly samples · ${coverage.missingSamples} internal gaps · available span ${formatSampleDays(coverage.spanHours / 24)}. Missing hours are not filled or projected.`);
-  set("simChartRange", `${formatUtc(stats.firstSampleTime)} – ${formatUtc(stats.lastSampleTime)} UTC`);
+  set("simChartRange", `${formatUtc(stats.firstSampleTime - FUNDING_HISTORY_STEP_MS)} – ${formatUtc(stats.lastSampleTime)} UTC · hypothetical open and close`);
+  set("simEventSummary", `Open: ${formatSignedMoney(-result.entryFees)} entry fees · During hold: ${formatSignedMoney(result.fundingUsd)} observed funding · Hypothetical close: ${formatSignedMoney(-result.exitFees)} exit fees and ${formatSignedMoney(result.pricePnl)} basis P&L · Final: ${formatSignedMoney(result.netUsd)}.`);
   elements.simStatus.textContent = `${market.label} · ${simComplete ? "Complete" : "Partial"} historical replay · ${stats.samples} observed hours · midpoint-only scenario${market.warning ? ` · ${market.warning}` : ""}`;
-  renderSimulatorChart(result.curve);
+  renderSimulatorChart(result);
 }
 
 function formatMoney(value) {
@@ -1093,25 +1095,49 @@ function formatMoney(value) {
 
 function formatSignedMoney(value) { return `${value >= 0 ? "+" : ""}${formatMoney(value)}`; }
 
-function renderSimulatorChart(curve) {
+function buildSimulatorChartTimeline(result) {
+  const firstTime = result.curve[0].time - FUNDING_HISTORY_STEP_MS;
+  const lastTime = result.curve.at(-1).time;
+  return [
+    { label: `Before open · ${formatUtc(firstTime)}`, kind: "beforeOpen", rate: null, cumulativeRate: 0, pnlUsd: 0 },
+    { label: `Open · ${formatUtc(firstTime)}`, kind: "open", rate: null, cumulativeRate: 0, pnlUsd: -result.entryFees },
+    ...result.curve.map((point) => ({ label: formatUtc(point.time), kind: "sample", rate: point.rate,
+      cumulativeRate: point.cumulativeRate, pnlUsd: point.fundingUsd - result.entryFees })),
+    { label: `Scenario close · ${formatUtc(lastTime)}`, kind: "close", rate: null,
+      cumulativeRate: result.curve.at(-1).cumulativeRate, pnlUsd: result.netUsd },
+  ];
+}
+
+function renderSimulatorChart(result) {
   if (typeof Chart === "undefined") throw new Error("Chart.js is not loaded");
   if (state.simChartInstance) state.simChartInstance.destroy();
+  const timeline = buildSimulatorChartTimeline(result);
   state.simChartInstance = new Chart(document.getElementById("simChart"), {
     type: "line",
     data: {
-      labels: curve.map((point) => formatUtc(point.time)),
+      labels: timeline.map((point) => point.label),
       datasets: [
-        { label: "Funding / Hr", data: curve.map((point) => point.rate * 100), yAxisID: "rate", borderColor: "#10b981", borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 3, tension: 0 },
-        { label: "Cumulative Funding", data: curve.map((point) => point.cumulativeRate * 100), yAxisID: "cumulative", borderColor: "#f59e0b", borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 3, tension: 0 },
-        { label: "Modeled Net P&L", data: curve.map((point) => point.netUsd), yAxisID: "profit", borderColor: "#a78bfa", borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 3, tension: 0 },
+        { label: "Funding / Hr", data: timeline.map((point) => point.rate === null ? null : point.rate * 100), yAxisID: "rate", borderColor: "#10b981", borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 3, tension: 0 },
+        { label: "Cumulative Funding", data: timeline.map((point) => point.cumulativeRate * 100), yAxisID: "cumulative", borderColor: "#f59e0b", borderWidth: 2.5, pointRadius: 0, pointHoverRadius: 3, tension: 0 },
+        { label: "Funding less entry fees / scenario close", data: timeline.map((point) => point.pnlUsd), yAxisID: "profit", borderColor: "#a78bfa", borderWidth: 2.5,
+          pointRadius: (context) => [1, timeline.length - 1].includes(context.dataIndex) ? 6 : 0,
+          pointBackgroundColor: (context) => context.dataIndex === timeline.length - 1 ? "#f8fafc" : "#a78bfa",
+          pointBorderColor: "#a78bfa", pointBorderWidth: 2, pointHoverRadius: 6, tension: 0 },
       ],
     },
     options: {
       responsive: true, maintainAspectRatio: false, animation: false,
       interaction: { mode: "index", intersect: false },
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (context) => context.dataset.yAxisID === "profit"
-        ? `${context.dataset.label}: ${formatSignedMoney(context.parsed.y)}`
-        : `${context.dataset.label}: ${signedPercent(context.parsed.y / 100)}` } } },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: (context) => {
+        if (context.dataset.yAxisID === "profit") {
+          const kind = timeline[context.dataIndex].kind;
+          const label = kind === "beforeOpen" ? "Before open" : kind === "open" ? "After entry fees" :
+            kind === "close" ? "After exit fees and basis P&L" : "Funding less entry fees";
+          return `${label}: ${formatSignedMoney(context.parsed.y)}`;
+        }
+        return `${context.dataset.label}: ${signedPercent(context.parsed.y / 100)}`;
+      }, afterBody: (items) => timeline[items[0]?.dataIndex]?.kind === "close" ?
+        [`Exit fees: ${formatSignedMoney(-result.exitFees)}`, `Basis P&L: ${formatSignedMoney(result.pricePnl)}`] : [] } } },
       scales: {
         x: { ticks: { color: "#94a3b8", maxTicksLimit: 7 }, grid: { display: false } },
         rate: { position: "left", title: { display: true, text: "Funding / Hr (%)", color: "#10b981" }, ticks: { color: "#10b981", callback: (value) => `${Number(value).toFixed(4)}%` }, grid: { color: "rgba(148,163,184,.12)" } },

@@ -169,6 +169,22 @@ test('exit basis convergence changes price P&L and exit perp fee', () => {
   assert.throws(() => run('modelFundingArbitrage(__points,100,90,1000,0.001,0.002,0,-1)'), /exit gap/);
 });
 
+test('chart applies entry costs at open and exit costs after the last funding sample', () => {
+  context.__points = [{time:3600000,rate:0.01,cumulativeRate:0.01},{time:7200000,rate:0.005,cumulativeRate:0.015}];
+  const result = run('modelFundingArbitrage(__points,100,90,1000,0.001,0.002,0,0)');
+  context.__result = result;
+  const timeline = run('buildSimulatorChartTimeline(__result)');
+  assert.deepEqual(Array.from(timeline, (point) => point.kind), ['beforeOpen','open','sample','sample','close']);
+  assert.equal(timeline[0].pnlUsd, 0);
+  assert.equal(timeline[1].pnlUsd, -result.entryFees);
+  assert.ok(Math.abs(timeline[2].pnlUsd - (result.curve[0].fundingUsd - result.entryFees)) < 1e-9);
+  assert.ok(Math.abs(timeline[3].pnlUsd - (result.fundingUsd - result.entryFees)) < 1e-9);
+  assert.equal(timeline[4].pnlUsd, result.netUsd);
+  assert.ok(Math.abs(timeline[4].pnlUsd - timeline[3].pnlUsd - (result.pricePnl - result.exitFees)) < 1e-9);
+  assert.equal(timeline[1].rate, null);
+  assert.equal(timeline[4].rate, null);
+});
+
 test('midpoint simulator requires both prices and a tradable size increment', () => {
   context.__points = [{time:1,rate:0,cumulativeRate:0}];
   assert.throws(() => run('modelFundingArbitrage(__points,0,100,1000,0,0,0)'), /capital/);

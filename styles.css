@@ -1355,6 +1355,8 @@ select:focus {
 .legend-rate::before { background: #10b981; }
 .legend-cumulative::before { background: #f59e0b; }
 .legend-profit::before { background: #a78bfa; }
+.legend-exit::before { background: #f8fafc; border: 2px solid #a78bfa; }
+.sim-event-summary { color: var(--text-secondary); font-size: 12px; line-height: 1.6; margin: 0 0 12px; }
 
 .sim-input-grid,
 .sim-price-grid,

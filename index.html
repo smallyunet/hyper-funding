@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- ChartJS for Funding History Graphs -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=20260930-pair-links" />
+    <link rel="stylesheet" href="./styles.css?v=20260930-cost-events" />
   </head>
   <body>
     <!-- Background grid decoration -->
@@ -544,15 +544,16 @@
             <p class="sim-source-note" id="simCoverage">Coverage: --</p>
             <div class="symbol-chart-heading">
               <div><h3>Funding and Modeled Net P&amp;L</h3><p id="simChartRange">--</p></div>
-              <div class="symbol-chart-legend"><span class="legend-rate">Funding / Hr</span><span class="legend-cumulative">Cumulative Funding</span><span class="legend-profit">Modeled Net P&amp;L</span></div>
+              <div class="symbol-chart-legend"><span class="legend-rate">Funding / Hr</span><span class="legend-cumulative">Cumulative Funding</span><span class="legend-profit">Funding less entry fees</span><span class="legend-exit">Scenario close</span></div>
             </div>
-            <div class="symbol-chart-container"><canvas id="simChart" aria-label="Hourly funding, cumulative funding, and modeled net profit" role="img"></canvas></div>
-            <p class="sim-source-note">The purple line shows the net value if the position were closed at each sampled hour using the selected hypothetical exit gap. Historical funding is observed; exit prices and fees are scenario estimates. Bid/ask spread and slippage are excluded. This is not realized profit.</p>
+            <p class="sim-event-summary" id="simEventSummary">Opening and closing costs: --</p>
+            <div class="symbol-chart-container"><canvas id="simChart" aria-label="Hourly funding and a P&L line with separate entry-fee and hypothetical exit-cost events" role="img"></canvas></div>
+            <p class="sim-source-note">The purple line drops when modeled entry fees are paid, then tracks observed funding less entry fees. The final outlined point applies the selected hypothetical exit fees and basis P&amp;L immediately after the last sample. Entry and exit prices use current midpoints and an assumed exit gap; the chart does not reconstruct historical trades. Bid/ask spread and slippage are excluded.</p>
           </div>
         </section>
       </div>
     </main>
 
-    <script src="./app.js?v=20260930-pair-links"></script>
+    <script src="./app.js?v=20260930-cost-events"></script>
   </body>
 </html>
