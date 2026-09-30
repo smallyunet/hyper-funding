@@ -589,3 +589,71 @@ test('simulator cancellation aborts history and prevents late progress from chan
     assert.match(node('simStatus').textContent, /cancelled/);
   } finally { context.__simOriginals = originals; run('({fetchInfo,findSimulatorPairs,fetchFundingHistory} = __simOriginals)'); }
 });
+
+test('zero references keep the cumulative origin separate from entry-fee break-even', () => {
+  context.__zeroResult = { entryFees: 10, curve: [
+    { time: 3600000, cumulativeRate: 0.004, fundingUsd: 4 },
+    { time: 7200000, cumulativeRate: 0.016, fundingUsd: 16 },
+  ] };
+  const references = run('buildSimulatorZeroReferences(__zeroResult)');
+  assert.equal(references.cumulativeStart.day, 0);
+  assert.equal(references.cumulativeStart.time, 0);
+  assert.equal(references.cumulativeReturn, undefined);
+  assert.equal(references.entryBreakEven.time, 5400000);
+  assert.equal(references.entryBreakEven.day, 1.5 / 24);
+  assert.equal(references.entryBreakEven.fraction, 0.5);
+  assert.equal(references.entryBreakEven.estimated, true);
+  assert.equal(references.entryBreakEven.fromIndex, 2);
+  assert.equal(references.entryBreakEven.toIndex, 3);
+  assert.match(run('formatSimulatorZeroCrossing(buildSimulatorZeroReferences(__zeroResult).entryBreakEven)'), /linear estimate/);
+});
+
+test('cumulative funding returning to zero and fee recovery occur at distinct dates', () => {
+  context.__zeroResult = { entryFees: 5, curve: [
+    { time: 3600000, cumulativeRate: -0.01, fundingUsd: -10 },
+    { time: 7200000, cumulativeRate: 0.01, fundingUsd: 10 },
+  ] };
+  const references = run('buildSimulatorZeroReferences(__zeroResult)');
+  assert.equal(references.cumulativeReturn.time, 5400000);
+  assert.equal(references.entryBreakEven.time, 6300000);
+  assert.equal(references.entryBreakEven.direction, 'up');
+});
+
+test('zero references never interpolate crossings through missing hourly history', () => {
+  context.__zeroResult = { entryFees: 10, curve: [
+    { time: 3600000, cumulativeRate: -0.004, fundingUsd: 4 },
+    { time: 10800000, cumulativeRate: 0.016, fundingUsd: 16 },
+  ] };
+  const references = run('buildSimulatorZeroReferences(__zeroResult)');
+  assert.equal(references.cumulativeReturn.uncertain, true);
+  assert.equal(references.entryBreakEven.uncertain, true);
+  assert.equal(references.entryBreakEven.time, null);
+  assert.equal(references.entryBreakEven.day, null);
+  assert.equal(references.entryBreakEven.fromTime, 3600000);
+  assert.equal(references.entryBreakEven.toTime, 10800000);
+  assert.match(run('formatSimulatorZeroCrossing(buildSimulatorZeroReferences(__zeroResult).entryBreakEven)'), /crossing time unknown/);
+});
+
+test('exact zero samples and zero fees have exact crossing dates without duplicate plateau markers', () => {
+  context.__zeroResult = { entryFees: 10, curve: [
+    { time: 3600000, cumulativeRate: -0.01, fundingUsd: 4 },
+    { time: 7200000, cumulativeRate: 0, fundingUsd: 10 },
+    { time: 10800000, cumulativeRate: 0, fundingUsd: 10 },
+    { time: 14400000, cumulativeRate: 0.01, fundingUsd: 16 },
+  ] };
+  const references = run('buildSimulatorZeroReferences(__zeroResult)');
+  assert.equal(references.entryBreakEven.time, 7200000);
+  assert.equal(references.entryBreakEven.estimated, false);
+  assert.equal(run("findSimulatorZeroCrossings(__zeroResult,'profit').length"), 1);
+  run('__zeroResult.entryFees = 0');
+  assert.equal(run('buildSimulatorZeroReferences(__zeroResult).entryBreakEven.day'), 0);
+});
+
+test('before-open zero and profitable hypothetical exit do not count as entry-fee recovery', () => {
+  context.__zeroResult = { entryFees: 10, netUsd: 80, curve: [
+    { time: 3600000, cumulativeRate: 0.004, fundingUsd: 4 },
+    { time: 7200000, cumulativeRate: 0.007, fundingUsd: 7 },
+  ] };
+  assert.equal(run('buildSimulatorZeroReferences(__zeroResult).entryBreakEven'), undefined);
+  assert.match(run('formatSimulatorZeroCrossing(undefined)'), /Not reached/);
+});

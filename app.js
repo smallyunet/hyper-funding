@@ -1113,6 +1113,7 @@ function resetSimulator() {
   document.getElementById("simCoverage").textContent = "Coverage: --";
   document.getElementById("simChartRange").textContent = "--";
   document.getElementById("simEventSummary").textContent = "Opening and closing costs: --";
+  document.getElementById("simZeroSummary").textContent = "Zero crossings: --";
   for (const id of ["simEntryDetails", "simExitDetails", "simBasisDetails"]) {
     document.getElementById(id).textContent = "Run a scenario to see the calculation details.";
   }
@@ -1503,12 +1504,96 @@ function buildSimulatorChartTimeline(result) {
   ];
 }
 
+function findSimulatorZeroCrossings(result, field) {
+  const startTime = result.curve[0].time - FUNDING_HISTORY_STEP_MS;
+  const initial = field === "cumulative" ? 0 : -result.entryFees;
+  const points = [{ time: startTime, value: initial, index: 1 }, ...result.curve.map((point, index) => ({
+    time: point.time, value: field === "cumulative" ? point.cumulativeRate : point.fundingUsd - result.entryFees, index: index + 2,
+  }))];
+  const markers = initial === 0 ? [{ time: startTime, day: 0, fromIndex: 1, toIndex: 1, fraction: 0, origin: true }] : [];
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    if (!(previous.value < 0 && current.value >= 0 || previous.value > 0 && current.value <= 0)) continue;
+    const fraction = current.value === 0 ? 1 : -previous.value / (current.value - previous.value);
+    const uncertain = current.value !== 0 && current.time - previous.time > FUNDING_HISTORY_STEP_MS;
+    const time = uncertain ? null : previous.time + fraction * (current.time - previous.time);
+    markers.push({ time, day: time === null ? null : (time - startTime) / (24 * FUNDING_HISTORY_STEP_MS),
+      fromIndex: previous.index, toIndex: current.index, fraction, direction: previous.value < 0 ? "up" : "down",
+      estimated: !uncertain && current.value !== 0, uncertain, fromTime: previous.time, toTime: current.time,
+      fromDay: (previous.time - startTime) / (24 * FUNDING_HISTORY_STEP_MS), toDay: (current.time - startTime) / (24 * FUNDING_HISTORY_STEP_MS) });
+  }
+  return markers;
+}
+
+function formatSimulatorZeroCrossing(marker) {
+  if (!marker) return "Not reached within the observed history";
+  if (marker.uncertain) return `Between Day ${formatNumber(marker.fromDay, 2)} (${formatUtc(marker.fromTime)}) and Day ${formatNumber(marker.toDay, 2)} (${formatUtc(marker.toTime)}) UTC; crossing time unknown due to a history gap`;
+  return `${marker.estimated ? "≈ " : ""}Day ${formatNumber(marker.day, 2)} · ${formatUtc(marker.time)} UTC${marker.estimated ? " (linear estimate between hourly samples)" : ""}`;
+}
+
+function buildSimulatorZeroReferences(result) {
+  const cumulative = findSimulatorZeroCrossings(result, "cumulative");
+  const entryFees = findSimulatorZeroCrossings(result, "profit");
+  return { cumulativeStart: cumulative[0], cumulativeReturn: cumulative.find((marker) => !marker.origin),
+    entryBreakEven: entryFees.find((marker) => marker.origin || marker.direction === "up") };
+}
+
+function simulatorZeroReferencePlugin(references) {
+  const lines = [
+    { axis: "cumulative", color: "#f59e0b", label: "Cumulative 0%", name: "Cumulative", marker: references.cumulativeReturn || references.cumulativeStart },
+    { axis: "profit", color: "#a78bfa", label: "Entry-fee P&L $0", name: "Entry fees", marker: references.entryBreakEven },
+  ];
+  return { id: "simulatorZeroReferences", afterDatasetsDraw(chart) {
+    const { ctx, chartArea: area, scales } = chart;
+    ctx.save();
+    ctx.font = '11px sans-serif';
+    lines.forEach((line, index) => {
+      const y = scales[line.axis].getPixelForValue(0);
+      if (y < area.top || y > area.bottom) return;
+      ctx.strokeStyle = line.color;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 5]);
+      ctx.lineDashOffset = index * 6;
+      ctx.beginPath(); ctx.moveTo(area.left, y); ctx.lineTo(area.right, y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.textAlign = index === 0 ? "right" : "left";
+      const labelX = index === 0 ? area.right - 6 : area.left + 6;
+      const labelY = Math.max(area.top + 12, y - 6);
+      const width = ctx.measureText(line.label).width;
+      ctx.fillStyle = "#0f1724";
+      ctx.fillRect(index === 0 ? labelX - width - 3 : labelX - 3, labelY - 11, width + 6, 15);
+      ctx.fillStyle = line.color; ctx.fillText(line.label, labelX, labelY);
+      const marker = line.marker;
+      if (!marker || marker.uncertain) return;
+      const leftX = scales.x.getPixelForValue(marker.fromIndex);
+      const rightX = scales.x.getPixelForValue(marker.toIndex);
+      const x = leftX + marker.fraction * (rightX - leftX);
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, area.bottom); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(x, y, 5, 0, Math.PI * 2);
+      ctx.fillStyle = "#0f1724"; ctx.fill(); ctx.stroke();
+      const text = `${line.name}: ${marker.estimated ? "≈ " : ""}Day ${formatNumber(marker.day, 2)}`;
+      const textWidth = ctx.measureText(text).width;
+      ctx.textAlign = "left"; ctx.fillStyle = line.color;
+      ctx.fillText(text, Math.max(area.left, Math.min(x - textWidth / 2, area.right - textWidth)), chart.height - 28 + index * 16);
+    });
+    ctx.restore();
+  } };
+}
+
 function renderSimulatorChart(result) {
   if (typeof Chart === "undefined") throw new Error("Chart.js is not loaded");
   if (state.simChartInstance) state.simChartInstance.destroy();
   const timeline = buildSimulatorChartTimeline(result);
+  const references = buildSimulatorZeroReferences(result);
+  document.getElementById("simZeroSummary").innerHTML =
+    `<span class="sim-zero-cumulative"><strong>Cumulative funding = 0:</strong> ${escapeHtml(formatSimulatorZeroCrossing(references.cumulativeStart))}${references.cumulativeReturn ? `<br>First return to zero: ${escapeHtml(formatSimulatorZeroCrossing(references.cumulativeReturn))}` : " · Starts at zero; no later return to zero observed."}</span>` +
+    `<span class="sim-zero-profit"><strong>Funding less entry fees = $0:</strong> ${escapeHtml(formatSimulatorZeroCrossing(references.entryBreakEven))}<br>Funding covers entry fees only; exit fees and basis P&amp;L are excluded.</span>`;
   state.simChartInstance = new Chart(document.getElementById("simChart"), {
     type: "line",
+    plugins: [simulatorZeroReferencePlugin(references)],
     data: {
       labels: timeline.map((point) => point.label),
       datasets: [
@@ -1522,6 +1607,7 @@ function renderSimulatorChart(result) {
     },
     options: {
       responsive: true, maintainAspectRatio: false, animation: false,
+      layout: { padding: { bottom: 44 } },
       interaction: { mode: "index", intersect: false },
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: (context) => {
         if (context.dataset.yAxisID === "profit") {

@@ -10,7 +10,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <!-- ChartJS for Funding History Graphs -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <link rel="stylesheet" href="./styles.css?v=20260930-simulator-progress-1" />
+    <link rel="stylesheet" href="./styles.css?v=20260930-zero-crossings-1" />
   </head>
   <body data-active-view="viewMarketBoard">
     <!-- Background grid decoration -->
@@ -568,6 +568,7 @@
             </div>
             <p class="sim-event-summary" id="simEventSummary">Opening and closing costs: --</p>
             <div class="symbol-chart-container"><canvas id="simChart" aria-label="Hourly funding and a P&L line with separate entry-fee and hypothetical exit-cost events" role="img"></canvas></div>
+            <div class="sim-zero-summary" id="simZeroSummary" aria-label="Zero levels and crossing dates">Zero crossings: --</div>
             <p class="sim-source-note">The purple line drops when modeled entry fees are paid, then tracks observed funding less entry fees. The final outlined point applies the selected hypothetical exit fees and basis P&amp;L immediately after the last sample. Entry and exit prices use current midpoints and an assumed exit gap; the chart does not reconstruct historical trades. Bid/ask spread and slippage are excluded.</p>
               <h3 class="section-label">Funding, costs &amp; basis</h3><div class="sim-breakdown"><article class="stat-box"><span class="stat-label">Historical funding replay · short perp</span><strong id="simFunding">--</strong></article><article class="stat-box"><span class="stat-label">Entry fees</span><strong id="simEntryFees">--</strong></article><article class="stat-box"><span class="stat-label">Exit fees</span><strong id="simExitFees">--</strong></article><article class="stat-box"><span class="stat-label">Exit basis · perp − spot</span><strong id="simExitBasisDisplay">--</strong></article><article class="stat-box"><span class="stat-label">Basis change P&amp;L</span><strong id="simPricePnl">--</strong></article></div>
               <details class="workspace-disclosure"><summary>Quotes &amp; matched position</summary><div class="sim-price-grid">
@@ -604,6 +605,6 @@
       </div>
     </main>
 
-    <script src="./app.js?v=20260930-simulator-progress-1"></script>
+    <script src="./app.js?v=20260930-zero-crossings-1"></script>
   </body>
 </html>

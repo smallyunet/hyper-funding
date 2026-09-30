@@ -1664,6 +1664,11 @@ body:not([data-active-view="viewMarketBoard"]) .workspace-status { display: flex
 .leaderboard-fees { display: grid; grid-template-columns: repeat(2, minmax(0, 240px)); gap: 14px; padding-top: 14px; }
 .leaderboard-progress { display: block; width: 100%; height: 6px; accent-color: var(--accent-blue); margin: 16px 0 24px; }
 .sim-loading { margin: 20px 24px 0; padding: 16px; background: #192a42; border: 1px solid #334c70; border-radius: 8px; }
+.sim-zero-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 14px 0; font-size: 12px; line-height: 1.7; color: var(--text-secondary); }
+.sim-zero-summary > span { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.sim-zero-cumulative strong { color: #f59e0b; }
+.sim-zero-profit strong { color: #a78bfa; }
+@media (max-width: 600px) { .sim-zero-summary { grid-template-columns: 1fr; } }
 .sim-loading[hidden] { display: none; }
 .sim-loading-heading { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; color: var(--text-secondary); font-size: 12px; margin-bottom: 12px; }
 .sim-loading-heading strong { color: var(--accent-blue); }
