@@ -924,12 +924,19 @@ function findSimulatorPairs(spotData, perpData) {
 function renderSimulatorPairList(pairs, selected) {
   elements.simPairRows.innerHTML = pairs.length ? pairs.map((pair) => `
     <tr class="sim-pair-row ${pair.spotCoin === selected ? "selected" : ""}">
-      <td><strong>${escapeHtml(pair.label)}</strong> <span class="stat-desc">${escapeHtml(pair.spotToken)}/USDC ↔ ${escapeHtml(pair.perp)}</span></td>
+      <td>
+        <strong>${escapeHtml(pair.label)}</strong> <span class="stat-desc">${escapeHtml(pair.spotToken)}/USDC ↔ ${escapeHtml(pair.perp)}</span>
+        <div class="sim-pair-links">
+          <a href="https://app.hyperliquid.xyz/trade/${encodeURIComponent(pair.spotToken)}/USDC" target="_blank" rel="noopener noreferrer" aria-label="Open ${escapeHtml(pair.spotToken)}/USDC spot on Hyperliquid">Spot ↗</a>
+          <a href="https://app.hyperliquid.xyz/trade/${encodeURIComponent(pair.perp)}" target="_blank" rel="noopener noreferrer" aria-label="Open ${escapeHtml(pair.perp)} perpetual on Hyperliquid">Perp ↗</a>
+        </div>
+        ${pair.reason || pair.warning ? `<span class="stat-desc sim-pair-warning">${escapeHtml(pair.reason || pair.warning)}</span>` : ""}
+      </td>
       <td class="num">${pair.spotMid > 0 ? formatNumber(pair.spotMid, pair.spotMid < 1 ? 6 : 2) : "--"}</td>
       <td class="num">${pair.perpMid > 0 ? formatNumber(pair.perpMid, pair.perpMid < 1 ? 6 : 2) : "--"}</td>
       <td class="num">${pair.spotMid > 0 && pair.perpMid > 0 ? signedPercent((pair.perpMid - pair.spotMid) / pair.spotMid) : "--"}</td>
       <td class="num">${formatUsd(pair.volume)}</td>
-      <td><button class="text-button secondary" type="button" data-sim-pair="${escapeHtml(pair.spotCoin)}" aria-pressed="${pair.spotCoin === selected}">${pair.spotCoin === selected ? "Selected" : pair.eligible ? "Simulate" : "View"}</button>${pair.reason || pair.warning ? `<span class="stat-desc"> ${escapeHtml(pair.reason || pair.warning)}</span>` : ""}</td>
+      <td><button class="text-button secondary" type="button" data-sim-pair="${escapeHtml(pair.spotCoin)}" aria-pressed="${pair.spotCoin === selected}">${pair.spotCoin === selected ? "Selected" : pair.eligible ? "Simulate" : "View"}</button></td>
     </tr>`).join("") : `<tr><td colspan="6" class="empty-cell">No pairs currently pass the market checks</td></tr>`;
 }
 

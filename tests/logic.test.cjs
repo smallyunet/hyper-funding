@@ -127,6 +127,13 @@ test('simulator separates verified xStocks from same-ticker reference markets', 
   assert.match(options, /<optgroup label="No two-sided midpoint">/);
   assert.equal((options.match(/<option /g) || []).length, pairs.length);
   assert.match(options, /value="@266"[^>]*>GOOGL/);
+  run("renderSimulatorPairList(__pairs, '@702')");
+  const pairRows = node('simPairRows').innerHTML;
+  assert.match(pairRows, /https:\/\/app\.hyperliquid\.xyz\/trade\/NVDAX\/USDC/);
+  assert.match(pairRows, /https:\/\/app\.hyperliquid\.xyz\/trade\/xyz%3ANVDA/);
+  assert.match(pairRows, /https:\/\/app\.hyperliquid\.xyz\/trade\/AAPLX\/USDC/);
+  assert.equal((pairRows.match(/>Spot ↗<\/a>/g) || []).length, pairs.length);
+  assert.equal((pairRows.match(/>Perp ↗<\/a>/g) || []).length, pairs.length);
   context.__spot[0].tokens[1].tokenId = 'wrong-token';
   assert.deepEqual(Array.from(run('findSimulatorPairs(__spot,__perp)'), (pair) => pair.perp), ['xyz:MU', 'xyz:GOOGL', 'xyz:AAPL']);
 });
